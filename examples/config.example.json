@@ -1,0 +1,19 @@
+{
+  "GITLAB_URL": "https://gitlab.com",
+  "GITLAB_TOKEN": "",
+  "GITLAB_PROJECT_ID": "",
+
+  "GITHUB_API_URL": "https://api.github.com",
+  "GITHUB_TOKEN": "",
+
+  "AZURE_DEVOPS_ORG_URL": "https://dev.azure.com/your-organization",
+  "AZURE_DEVOPS_PROJECT": "",
+  "AZURE_DEVOPS_TOKEN": "",
+
+  "SONAR_URL": "https://sonarcloud.io",
+  "SONAR_PROJECT_KEY": "",
+  "SONAR_TOKEN": "",
+
+  "REVIEW_REPO_ROOT": "",
+  "REVIEW_DOTNET_PROJECT": ""
+}

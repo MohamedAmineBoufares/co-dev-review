@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "co-dev-review": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/co-dev-review/src/server.js"]
+    }
+  }
+}

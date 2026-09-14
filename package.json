@@ -1,0 +1,32 @@
+{
+  "name": "co-dev-review",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Provider-independent MCP tools for human-approved code reviews and Azure DevOps tasks",
+  "engines": {
+    "node": ">=20.20.2"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/service.js && node --check src/providers.js && node --check src/store.js && node --check src/cli.js && node --check src/hunks.js && node --check src/checks.js && node --check src/rubrics.js && node --check src/blast-radius.js && node --check src/review-ui.js && node --check src/repo-skills.js && node --check src/trace.js",
+    "doctor": "node src/cli.js doctor",
+    "approve": "node src/cli.js approve",
+    "import-config": "node src/cli.js import-config",
+    "tools": "node scripts/list-tools.js",
+    "pending": "node src/cli.js pending",
+    "link-skills": "node scripts/link-skills.js",
+    "trace": "node src/cli.js trace"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "jsonc-parser": "3.3.1",
+    "zod": "3.25.76"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<your-account>/co-dev-review.git"
+  }
+}

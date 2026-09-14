@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
+test('real MCP stdio handshake, discovery, prompt and validation', { timeout: 20000 }, async t => {
+  const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../src/server.js', import.meta.url))], env: { ...process.env, CO_DEV_TRACE: 'off' }, stderr: 'pipe' });
+  const client = new Client({ name: 'integration-test', version: '1.0.0' });
+  t.after(() => client.close());
+  await client.connect(transport);
+  const { tools } = await client.listTools();
+  assert.deepEqual(tools.map(x => x.name).sort(), ['plan_ticket_tasks', 'review_sonar', 'review_work']);
+  const instructions = client.getInstructions();
+  assert.match(instructions, /^co-dev-review server \d+\.\d+\.\d+\. review_work steps: read, read_file, rubric, checks, blast_radius, prepare_comments, view_draft, publish\./, 'instructions must name the version and every step so a stale client is detectable');
+  assert.equal(client.getServerVersion().version, JSON.parse(await import('node:fs/promises').then(m => m.readFile(new URL('../package.json', import.meta.url), 'utf8'))).version);
+  for (const tool of tools) assert.match(tool.description, tool.name === 'review_sonar' ? /Sonar/ : /^request\.step is one of: /, 'workflow tool descriptions must carry the step list in case a client flattens the schema');
+  const prompt = await client.getPrompt({ name: 'review_workflow', arguments: { language: 'fr' } });
+  assert.match(prompt.messages[0].content.text, /Publication language: fr/);
+  const invalid = await client.callTool({ name: 'review_work', arguments: { request: { step: 'prepare_comments', target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor', path: 'x' }] } } });
+  assert.equal(invalid.isError, true);
+  const missingEstimate = await client.callTool({ name: 'plan_ticket_tasks', arguments: { request: { step: 'prepare', ticketId: 42, language: 'en', tasks: [{ title: 'Fix', description: 'Test it' }] } } });
+  assert.equal(missingEstimate.isError, true);
+  const missingTarget = await client.callTool({ name: 'review_sonar', arguments: {} });
+  assert.equal(missingTarget.isError, true);
+  const noCoverage = await client.callTool({ name: 'review_work', arguments: { request: { step: 'prepare_comments', target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor' }] } } });
+  assert.equal(noCoverage.isError, true);
+  const invalidStep = await client.callTool({ name: 'review_work', arguments: { request: { step: 'approve' } } });
+  assert.equal(invalidStep.isError, true);
+});

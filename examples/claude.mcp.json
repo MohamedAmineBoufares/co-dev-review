@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "co-dev-review": {
+      "command": "node",
+      "args": ["/absolute/path/to/co-dev-review/src/server.js"]
+    }
+  }
+}
