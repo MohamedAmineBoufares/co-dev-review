@@ -2,6 +2,7 @@ import { ledger, changedPaths } from './hunks.js';
 import { suggestRubrics } from './rubrics.js';
 import { repoSkills } from './repo-skills.js';
 import { localHead } from './local.js';
+import { detectPackageManager } from './worktree.js';
 import { compactFile, compactDiscussions, compactTicket, compactComments, compactSonar, compactRule } from './compact.js';
 
 // Combine related reads without hiding partial failures or pagination.
@@ -38,8 +39,15 @@ export async function reviewContext(providers, target, page = 1, worktrees) {
   const localCheckout = local && { ...local, matchesReview: local.head === review.head || Boolean(reviewWorktree?.matchesReview), worktree: reviewWorktree || undefined,
     note: reviewWorktree?.matchesReview ? `Review worktree ${prepared.path} is at the head of this review; run step=checks, step=blast_radius and step=tests with this target.`
       : `No worktree is at the head of this review (${String(review.head).slice(0, 8)}, branch ${review.sourceBranch ?? 'unknown'}). Run step=checkout with this target, then step=checks and step=blast_radius with the same target; prepare_comments requires their runIds or an explicit skip reason.` };
+  // What the assistant needs to ask the user before spending minutes on a checkout.
+  const checkoutPlan = providers.config?.REVIEW_REPO_ROOT ? {
+    policy: ['ask', 'always', 'never'].includes(providers.config.REVIEW_CHECKOUT) ? providers.config.REVIEW_CHECKOUT : 'ask',
+    packageManager: detectPackageManager(providers.config.REVIEW_REPO_ROOT),
+    existingWorktree: prepared ? (prepared.head === review.head ? 'at this head: checkout is instant' : 'from an older head: checkout updates it') : 'none',
+  } : { policy: 'never', reason: 'REVIEW_REPO_ROOT is not configured' };
   return { ...context,
     rubrics: suggestRubrics(changedPaths(files)),
+    checkoutPlan,
     localCheckout,
     repoSkills: repoSkills(providers.config, { origin: 'REVIEW_REPO_ROOT, which is assumed to be a checkout of this same project — verify that before relying on it' }),
     note: 'Continue nextPage until null. Errors and omitted patches mean incomplete evidence. Read full files at review.head for context (read_file takes a line range). Load the skills named in rubrics (or fetch their text with step=rubric), read the repoSkills that match this change, and account for every hunk id: prepare_comments requires a verdict for each one.' };

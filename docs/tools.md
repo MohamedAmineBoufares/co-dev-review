@@ -10,15 +10,17 @@ Reviews local changes before pushing, or a remote GitLab MR or GitHub PR, and pu
 
 | Step | Parameters | Returns |
 | --- | --- | --- |
-| `read` | `target?`, `page`, `mode` (`working`/`staged`/`branch`), `base` | Diff page (path, status, patch), existing discussions without system notes, hunk ledger and `nextPage`. Page 1 also returns the rubrics, repository skills and worktree status. Without a `target`, it reads the local checkout, paged by 100 files or about 200 KB |
+| `read` | `target?`, `page`, `mode` (`working`/`staged`/`branch`), `base` | Diff page (path, status, patch), existing discussions without system notes, hunk ledger and `nextPage`. Page 1 also returns the rubrics, repository skills, worktree status and `checkoutPlan` (policy, detected package manager, existing worktree), so the assistant can ask before checking out. Without a `target`, it reads the local checkout, paged by 100 files or about 200 KB |
 | `read_file` | `target`, `path`, `ref`, `lines?` | A file at the reviewed head, from the review worktree when it is at that commit, otherwise from the API. `lines` (`"120-220"`, `"120-"`, `"-80"`) returns a range; without it, files over 1,500 lines are cut with a continuation hint |
 | `rubric` | `names` (≤ 8) | Full text of packaged or repository skills, for clients that cannot load skill files |
-| `checkout` | `target`, `install` (default `true`) | Prepares the review worktree at the head and installs dependencies |
+| `checkout` | `target`, `packageManager` (`auto`/`link`/`pnpm`/`npm`/`yarn`/`none`), `install` | Prepares the review worktree at the head; dependencies are linked from your checkout when the change touches no lockfile or `package.json`, otherwise installed |
 | `checks` | `target?` or `mode`/`base`, `only?`, `detail?` | Compiler and linter findings on changed lines, pre-existing ones counted by rule (`detail: "full"` lists them), plus a `runId` |
 | `blast_radius` | `target?` or `mode`/`base`, `detail?`, `symbols?` | Changed exported symbols with their caller count and one caller per file; `symbols: [name]` or `detail: "full"` lists up to 50 callers each. Plus a `runId` |
 | `tests` | `target?` or `mode`/`base` | Runs only the unit tests related to the changed files (Vitest `related`, Jest `--findRelatedTests`), per project; returns counts and the first lines of each failure, plus a `runId` |
 | `prepare_comments` | `target`, `language` (`fr`/`en`), `items`, `coverage`, `rubricsApplied`, `deterministic`, `approval?` | The saved draft and the approval outcome |
-| `request_approval` | `draftId`, `approval?` | Asks for approval of an existing draft again |
+| `request_approval` | `draftId`, `approval?` | Asks for approval of an existing draft again (in conversation mode, returns the preview to show) |
+| `approve` | `draftId`, `selectedIds`, `userWords`, `publish` (default `true`) | Records the approval the user typed in the conversation and publishes it. Only for a draft whose preview was shown and is unchanged; disabled unless `REVIEW_APPROVAL` is `conversation` |
+| `revise` | `draftId`, `itemId`, `text` | Rewords one item at the user's request; returns its new preview, and voids any earlier approval |
 | `view_draft` | `draftId` | The draft, its stored approval and its publication journal |
 | `publish` | `draftId` | Posts the approved items; refuses without a valid approval |
 
@@ -34,7 +36,7 @@ The parameters of `prepare_comments`:
   - `verdict`: `finding`, `reviewed-clean` or `not-applicable`
 - **`rubricsApplied`**: the rubric and repository skill names actually applied. They are shown to the approver.
 - **`deterministic`**: `{ checks, blastRadius, tests? }`, each `{ runId }` from a run on this head and base, or `{ skipped: "<reason, 20+ characters>" }`. `tests` is optional and verified the same way when given.
-- **`approval`**: `auto` (default), `in-chat`, `browser` or `terminal`.
+- **`approval`**: `default` (the `REVIEW_APPROVAL` setting, `conversation` unless changed), `conversation`, `in-chat`, `browser`, `terminal` or `auto`.
 
 The result confirms the draft by id, severity, confidence and anchor without repeating the bodies you sent; `view_draft` shows everything.
 
@@ -42,6 +44,7 @@ The result confirms the draft by id, severity, confidence and anchor without rep
 
 | Status | Meaning |
 | --- | --- |
+| `pending` with a `preview` | Conversation mode: show the preview, then call `approve` with the user's reply |
 | `published` | Approved and posted; `journal` lists what was created |
 | `approved` | Approved; publish when the user asks |
 | `pending` | The user is deciding in the browser or terminal |
@@ -57,7 +60,7 @@ Turns an Azure DevOps Bug or PBI into estimated child tasks.
 | `search` | `wiql` or `queryId` (exactly one) | Up to 200 tickets: id, title, type, state, assignee, tags, area, iteration |
 | `read` | `ticketId`, `continuationToken?`, `full?` | Reviewer-relevant fields with HTML converted to text (description, acceptance criteria, repro steps), parent, children, related items, linked pull requests and attachments, and the discussion. `full: true` returns the raw work item |
 | `prepare` | `ticketId`, `language`, `tasks`, `approval?` | The saved draft, the total hours and the approval outcome |
-| `request_approval`, `view_draft`, `publish` | `draftId` | As for reviews |
+| `request_approval`, `approve`, `revise`, `view_draft`, `publish` | `draftId`… | As for reviews; task ids are `T1`, `T2`… |
 
 Each task has a `title`, a `description` in Azure HTML (scope, completion criteria, dependencies, estimate assumptions), `estimatedHours` and an optional `assignedTo`, which defaults to `AZURE_DEVOPS_ASSIGNEE`.
 

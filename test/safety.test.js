@@ -194,3 +194,35 @@ test('test-run evidence is optional, but checked like the others when given', as
   assert.ok(withTests.deterministic.tests.runId);
   await assert.rejects(service.reviewDraft({ ...request, deterministic: { ...passes, tests: { runId: (await run('tests', { head: 'old' })).id } } }), /not the review head/);
 });
+
+test('conversation approval posts only the named items of a draft that was shown and is unchanged', async t => {
+  const { draft, service, store, state } = await fixture(t);
+  const { renderPreview, approveFromConversation } = await import('../src/approval.js');
+  const d = await draft();
+  await assert.rejects(approveFromConversation(service, d.id, { selectedIds: ['R1'], userWords: 'approve R1' }), /never shown/, 'a draft never displayed cannot be approved from the chat');
+  const preview = renderPreview(d);
+  assert.match(preview, /### R1 · .*BLOCKER/);
+  assert.match(preview, /```diff[\s\S]*\+new/);
+  assert.match(preview, /approve all except/);
+  await store.markPreviewed(d);
+  await assert.rejects(approveFromConversation(service, d.id, { selectedIds: ['R9'], userWords: 'approve R9' }), /Unknown item id/);
+  const outcome = await approveFromConversation(service, d.id, { selectedIds: ['R2'], userWords: 'approve all except R1' });
+  assert.equal(outcome.status, 'published');
+  assert.deepEqual(state.posts.map(post => post.id), ['R2']);
+  const record = await store.maybe(d.id, 'approval.json');
+  assert.equal(record.via, 'conversation');
+  assert.equal(record.userWords, 'approve all except R1', "the user's words are kept with the approval");
+});
+test('a draft edited after it was shown must be shown again; revise does that', async t => {
+  const { draft, service, store, state } = await fixture(t);
+  const { approveFromConversation, reviseItem } = await import('../src/approval.js');
+  const d = await draft();
+  await store.markPreviewed(d);
+  await store.updateItem(d.id, 'R2', { body: 'Changed behind the user.' });
+  await assert.rejects(approveFromConversation(service, d.id, { selectedIds: ['R2'], userWords: 'approve' }), /changed after it was shown/);
+  const revised = await reviseItem(service, d.id, 'R2', 'Reformulé.');
+  assert.match(revised.preview, /> Reformulé\./);
+  const outcome = await approveFromConversation(service, d.id, { selectedIds: ['R2'], userWords: 'ok approve R2', publish: false });
+  assert.equal(outcome.status, 'approved', '"later" approves without posting');
+  assert.equal(state.posts.length, 0);
+});

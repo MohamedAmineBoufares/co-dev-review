@@ -48,6 +48,8 @@ Restart or reload each assistant afterwards.
 | `REVIEW_REMOTE` | optional | Remote MR/PR heads are fetched from; default `origin` |
 | `REVIEW_WORKTREE_DIR` | optional | Where review worktrees go; default beside `REVIEW_REPO_ROOT` |
 | `REVIEW_DOTNET_PROJECT` | optional | `.sln`/`.csproj` for `checks` when auto-detection picks the wrong one |
+| `REVIEW_APPROVAL` | optional | `conversation` (default: approve by replying in the chat), `in-chat` (MCP form), `browser`, `terminal` or `auto` (form, then browser, then terminal). Anything but `conversation` disables approval by chat reply |
+| `REVIEW_CHECKOUT` | optional | `ask` (default: ask diff-only or worktree, and which package manager), `always` or `never` |
 | `EXTRA_CA_CERTS` | optional | `.pem` of a corporate proxy's CA; see below |
 
 In JSON, write Windows paths with forward slashes, or escape the backslashes.

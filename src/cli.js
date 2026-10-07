@@ -9,6 +9,7 @@ import { doctor } from './doctor.js';
 import { init, uninstall, importConfig } from './init.js';
 import { clients } from './clients.js';
 import { linkSkills } from './skill-links.js';
+import { listWorktrees, removeWorktree } from './worktree.js';
 import { relaunchWithExtraCa } from './ca.js';
 
 // One line per server call, grouped by what was being reviewed, so a review's protocol is
@@ -40,6 +41,8 @@ function renderTrace(events) {
 ${' '.repeat(29)}approval: ${e.approval}` : '')
         + (e.deterministic ? `\n${' '.repeat(29)}deterministic: ${Object.entries(e.deterministic).map(([pass, how]) => how === 'run' ? style.green(`${pass} run`) : style.yellow(`${pass} skipped`)).join(', ')}` : ''); break;
       case 'prepare': detail = `draft ${e.draft?.slice(0, 8)} · ${e.tasks} task(s) · ${e.totalHours} h${e.approval ? ` · approval ${e.approval}` : ''}`; break;
+      case 'approve': detail = `draft ${e.draft?.slice(0, 8)} · ${e.selected ?? '?'} item(s) · approval ${e.approval ?? '?'}`; break;
+      case 'revise': detail = `draft ${e.draft?.slice(0, 8)} · ${safe(e.item ?? '')} reworded`; break;
       case 'request_approval': detail = `draft ${e.draft?.slice(0, 8)} · approval ${e.approval ?? '?'}`; break;
       case 'publish': detail = `draft ${e.draft?.slice(0, 8)} · ${e.posted} posted`; break;
       case 'view_draft': detail = `draft ${e.draft?.slice(0, 8)}`; break;
@@ -123,6 +126,7 @@ const HELP = `co-dev-review <command>
   doctor                     check credentials and connectivity, read-only
   approve [draft]            inspect and approve a draft in this terminal
   pending                    list drafts and their state
+  worktrees [remove <n|all>] list or safely remove review worktrees
   trace [n]                  what the last reviews actually did
   link-skills [client...] [--dry-run] [--force]
   import-config <mcp.json>   import allowlisted settings from another MCP configuration
@@ -147,6 +151,22 @@ async function main() {
     return;
   }
   if (command === 'doctor') { if (!await doctor(loadConfig())) process.exitCode = 1; return; }
+  if (command === 'worktrees') {
+    const config = loadConfig();
+    const all = await listWorktrees(config);
+    if (arg === 'remove') {
+      const which = rest[1];
+      if (!which) throw new Error('Usage: co-dev-review worktrees remove <number|all>');
+      const chosen = which === 'all' ? all : all.filter(w => w.key.endsWith(`:${which}`));
+      if (!chosen.length) throw new Error(`No review worktree for ${which}`);
+      for (const w of chosen) console.log(`removed ${safe(await removeWorktree(config, w.key))}`);
+      return;
+    }
+    if (!all.length) { console.log('No review worktrees.'); return; }
+    for (const w of all) console.log(`${safe(w.key)}  ${safe(w.path)}${w.exists ? '' : style.yellow(' (missing)')}  head ${String(w.head).slice(0, 8)}${w.linked?.length ? style.dim(`  ${w.linked.length} linked node_modules`) : ''}  ${style.grey(age(w.preparedAt))}`);
+    console.log(style.dim('\nRemove one with: co-dev-review worktrees remove <MR number>  (unlinks borrowed node_modules first)'));
+    return;
+  }
   if (command === 'link-skills') {
     const wanted = rest.filter(x => !x.startsWith('--'));
     const dirs = [...new Set(clients.filter(c => c.skills && (wanted.length ? wanted.includes(c.id) : c.detected())).map(c => c.skills))];

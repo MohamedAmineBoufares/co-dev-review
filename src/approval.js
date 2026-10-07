@@ -23,15 +23,43 @@ export function itemText(item) {
   return clip(body + code, DESCRIPTION_LIMIT);
 }
 const heading = draft => draft.kind === 'review'
-  ? `${draft.snapshot?.title ?? 'Review'} · ${draft.target.provider} ${draft.target.project ?? ''} #${draft.target.number} · head ${String(draft.snapshot?.head).slice(0, 8)}`
+  ? `${draft.snapshot?.title ?? 'Review'} · ${[draft.target.provider, draft.target.project, `#${draft.target.number}`].filter(Boolean).join(' ')} · head ${String(draft.snapshot?.head).slice(0, 8)}`
   : `Tasks under work item ${draft.parent?.id}: ${draft.parent?.fields?.['System.Title'] ?? ''}`;
+
+// Markdown the assistant shows verbatim: one block per item with its code, so the user can choose in the chat.
+const ICON = { blocker: '🔴', major: '🟠', minor: '🔵', suggestion: '⚪' };
+export function renderPreview(draft, onlyIds) {
+  const items = draft.items.filter(item => !onlyIds || onlyIds.includes(item.id));
+  const blocks = items.map(item => {
+    if (!item.severity) {
+      const description = itemText({ description: item.description }).split('\n').map(line => `> ${line}`).join('\n');
+      return `### ${item.id} · ${item.title} · ${item.estimatedHours} h\n${description}`;
+    }
+    const where = item.path ? `\`${item.path}:${item.line}\`` : 'general comment';
+    const snippet = item.context?.snippet
+      ? `\n\`\`\`diff\n${item.context.snippet.split('\n').map((line, i) => (i === item.context.markerIndex ? `${line}    ◀` : line)).join('\n')}\n\`\`\``
+      : '';
+    const body = String(item.body).split('\n').map(line => `> ${line}`).join('\n');
+    return `### ${item.id} · ${ICON[item.severity] ?? ''} ${item.severity.toUpperCase()}${item.confidence ? ` (${item.confidence})` : ''} · ${where}${snippet}\n${body}`;
+  });
+  if (onlyIds) return blocks.join('\n\n');
+  const counts = Object.entries(items.reduce((n, item) => ({ ...n, [item.severity ?? 'task']: (n[item.severity ?? 'task'] ?? 0) + 1 }), {})).map(([k, v]) => `${v} ${k}`).join(', ');
+  const verb = draft.kind === 'review' ? 'post' : 'create';
+  return [
+    `## ${draft.kind === 'review' ? 'Review comments' : 'Tasks'} to approve · draft \`${draft.id.slice(0, 8)}\``,
+    `${heading(draft)}  \n${draft.destination}  \n${items.length} item(s): ${counts}`,
+    ...blocks,
+    '---',
+    `Reply **approve all**, **approve R1 R3**, **approve all except R2** or **cancel**. Add "later" to approve without ${verb === 'post' ? 'posting' : 'creating'} now. You can also ask to reword an item first.`.replace(/R(\d)/g, draft.kind === 'review' ? 'R$1' : 'T$1'),
+  ].join('\n\n');
+}
 
 export const supportsForm = capabilities => Boolean(capabilities?.elicitation && (capabilities.elicitation.form || !capabilities.elicitation.url));
 export const supportsUrl = capabilities => Boolean(capabilities?.elicitation?.url);
 
-async function decide(service, draft, selectedIds, then, via) {
+async function decide(service, draft, selectedIds, then, via, userWords) {
   if (!selectedIds.length) return { via, status: 'nothing-selected', note: 'The user selected no item. Nothing was approved or posted.' };
-  await service.store.approve(draft.id, selectedIds, digest(draft), { via });
+  await service.store.approve(draft.id, selectedIds, digest(draft), { via, userWords });
   if (then !== 'publish') return { via, status: 'approved', selectedIds, note: 'Approved for 24 hours. Publish when the user asks.' };
   try {
     const { journal } = await service.publish(draft.id);
@@ -160,4 +188,27 @@ export async function approveInBrowser(service, draft, { open = openBrowser } = 
   server.unref();
   const url = `http://127.0.0.1:${server.address().port}/${token}`;
   return { url, opened: await open(url), close: () => server.close() };
+}
+
+// Approval typed in the conversation. The assistant relays the user's reply; the server checks that
+// the draft was shown in the conversation and has not changed since, and records the user's words.
+export async function approveFromConversation(service, draftId, { selectedIds, userWords, publish = true }) {
+  const draft = await service.store.read(draftId);
+  const shown = await service.store.previewed(draftId);
+  if (!shown) throw new Error('This draft was never shown in the conversation. Use request_approval with approval "conversation" and show its preview first.');
+  if (shown.hash !== digest(draft)) throw new Error('The draft changed after it was shown. Show the new preview (request_approval) before approving.');
+  const ids = draft.items.map(item => item.id);
+  const unknown = selectedIds.filter(id => !ids.includes(id));
+  if (unknown.length) throw new Error(`Unknown item id(s): ${unknown.join(', ')}. This draft has ${ids.join(', ')}.`);
+  return decide(service, draft, [...new Set(selectedIds)], publish ? 'publish' : 'approve', 'conversation', userWords);
+}
+
+// Rewording an item at the user's request: the old approval is void, the new text is shown again.
+export async function reviseItem(service, draftId, itemId, text) {
+  const before = await service.store.read(draftId);
+  const item = before.items.find(x => x.id === itemId);
+  if (!item) throw new Error(`Unknown item ${itemId}`);
+  const draft = await service.store.updateItem(draftId, itemId, { [item.body !== undefined ? 'body' : 'description']: text });
+  await service.store.markPreviewed(draft);
+  return { draftId, itemId, preview: renderPreview(draft, [itemId]), note: 'Show this revised item to the user verbatim, then wait for their approval of the draft.' };
 }

@@ -32,7 +32,7 @@ export function summarize(tool, args, result, error) {
         gate: result?.sonar?.gate?.data?.status ?? result?.sonar?.gate?.data?.projectStatus?.status,
         checkout: result?.localCheckout ? (result.localCheckout.worktree?.matchesReview ? 'review worktree at head' : result.localCheckout.matchesReview ? 'matches review head' : `MISMATCH: local is on ${result.localCheckout.branch}`) : undefined };
     case 'checkout':
-      return { ...entry, head: result?.head?.slice(0, 12), reused: result?.reused, install: result?.install?.status };
+      return { ...entry, head: result?.head?.slice(0, 12), reused: result?.reused, install: result?.install?.status, manager: args?.request?.packageManager };
     case 'rubric':
       return { ...entry, fetched: result?.rubrics?.map(r => `${r.source}:${r.name}`), missing: result?.missing };
     case 'checks':
@@ -52,6 +52,10 @@ export function summarize(tool, args, result, error) {
         deterministic: result?.draft?.deterministic && Object.fromEntries(Object.entries(result.draft.deterministic).map(([pass, x]) => [pass, x.runId ? 'run' : 'skipped'])) };
     case 'prepare':
       return { ...entry, draft: result?.draft?.id, tasks: result?.draft?.items?.length, totalHours: result?.totalEstimatedHours, approval: result?.approval ? `${result.approval.via} ${result.approval.status}` : undefined };
+    case 'approve':
+      return { ...entry, draft: args.request.draftId, approval: result?.approval ? `${result.approval.via} ${result.approval.status}` : undefined, selected: args.request.selectedIds?.length };
+    case 'revise':
+      return { ...entry, draft: args.request.draftId, item: args.request.itemId };
     case 'request_approval':
       return { ...entry, draft: args.request.draftId, approval: result?.approval ? `${result.approval.via} ${result.approval.status}` : undefined };
     case 'view_draft':

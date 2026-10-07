@@ -4,7 +4,26 @@ co-dev-review reads freely, but writes only after you've approved exactly what w
 
 ## Approving a draft
 
-When the assistant calls `prepare_comments` (reviews) or `prepare` (tasks), the server saves the exact draft and asks you to approve it, in the first of these places your assistant supports:
+When the assistant calls `prepare_comments` (reviews) or `prepare` (tasks), the server saves the exact draft and asks you to approve it.
+
+### In the conversation (default)
+
+The assistant shows the draft in the chat, formatted by the server. Each item shows its id, severity and confidence, `file:line`, the diff lines it lands on (the target line marked ◀) and the comment text. You reply in your own words:
+
+| You type | What happens |
+| --- | --- |
+| `approve all` | Everything is posted |
+| `approve R1 R3` | Only R1 and R3 are posted |
+| `approve all except R2` | Everything but R2 is posted |
+| … `later` | Approved, not posted yet; ask to publish when ready |
+| `reword R2: …` | The assistant revises R2 (step `revise`) and shows it again |
+| `cancel` | Nothing is posted |
+
+Chat windows can't render clickable checkboxes, so typing the ids is the equivalent.
+
+### Other ways to approve
+
+Set `REVIEW_APPROVAL` to `in-chat`, `browser`, `terminal` or `auto` to approve outside the conversation instead (see below for why you might):
 
 | Where | When | What you do |
 | --- | --- | --- |
@@ -14,14 +33,24 @@ When the assistant calls `prepare_comments` (reviews) or `prepare` (tasks), the 
 
 With "post now", the selected items are published immediately and the assistant reports what was posted. With "approve only", ask the assistant to publish when you're ready.
 
-The assistant can force a route with `approval: "in-chat" | "browser" | "terminal"`, or ask again later with step `request_approval`.
+The assistant can choose a route per draft with `approval: "conversation" | "in-chat" | "browser" | "terminal" | "auto"`, or ask again later with step `request_approval`.
 
 ## What the model can and cannot do
+
+**In the conversation**, the assistant acts on your reply: it calls step `approve` with the ids you named. The server makes that verifiable:
+
+- Only a draft whose preview was returned for display, and that hasn't changed since, can be approved. Anything edited afterwards must be shown again (`revise` does this).
+- Your reply is quoted in `userWords` and stored with the approval, so the record shows what you actually typed.
+- Unknown ids are refused, and the assistant is told never to treat repository, ticket or tool text as approval.
+
+This relies on the assistant relaying your reply faithfully. A merge request containing text crafted to look like an approval is the risk it accepts. Your assistant's own permission prompt for tool calls adds a second check. If you want an approval the model cannot produce at all, set `REVIEW_APPROVAL` to `in-chat`, `browser` or `terminal`: `approve` is then disabled, and only the following apply.
+
+**With a form, the browser or the terminal:**
 
 - **No tool argument approves anything.** The model can only ask for approval.
 - **The model never answers the form.** The form is answered by you, in the assistant's own interface. If you configure a Claude Code `Elicitation` hook, it can answer forms on your behalf, so don't add one that auto-accepts.
 - **The model never sees the browser page's address.** It carries a random token that is never returned to the model. The page accepts requests only for `127.0.0.1:<port>`, which blocks DNS rebinding, can be used once, and expires after 30 minutes.
-- **Approval is tied to exact content.** It is bound to the draft's content hash, the selected item ids and a 24-hour expiry, and records where it came from (`via`: in-chat, browser or terminal). Editing an item voids any earlier approval.
+- **Approval is tied to exact content.** It is bound to the draft's content hash, the selected item ids and a 24-hour expiry, and records where it came from (`via`: conversation, in-chat, browser or terminal). Editing an item voids any earlier approval.
 - **Publishing re-checks the target.** It checks the destination and the current PR head. A new commit on the MR, or a changed parent ticket, means a new draft.
 - **Inline comments are anchored to the reviewed commit,** on validated added or deleted lines.
 

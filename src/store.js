@@ -68,17 +68,22 @@ export class Store {
     catch (error) { if (error.code === 'EEXIST') throw new Error('Draft is locked by another operation. If a process crashed, reconcile its journal before manually removing the lock.'); throw error; }
     try { return await fn(); } finally { await handle.close(); await fs.unlink(this.file(id, 'lock')); }
   }
-  async approve(id, selectedIds, expectedHash, { via = 'terminal' } = {}) {
+  async approve(id, selectedIds, expectedHash, { via = 'terminal', userWords } = {}) {
     return this.withLock(id, async () => {
       const draft = await this.read(id);
       if (expectedHash && expectedHash !== digest(draft)) throw new Error('Draft changed during approval; inspect it again');
       const ids = draft.items.map(x => x.id);
       if (!selectedIds.length || new Set(selectedIds).size !== selectedIds.length || selectedIds.some(x => !ids.includes(x))) throw new Error('Select at least one valid, unique item');
-      const approval = { hash: digest(draft), selectedIds, via, approvedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() };
+      const approval = { hash: digest(draft), selectedIds, via, ...(userWords ? { userWords } : {}), approvedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() };
       await fs.writeFile(this.file(id, 'approval.json'), JSON.stringify(approval, null, 2), { mode: 0o600 });
       return approval;
     });
   }
+  // What was shown in the conversation, so only an unchanged, displayed draft can be approved there.
+  async markPreviewed(draft) {
+    await fs.writeFile(this.file(draft.id, 'preview.json'), JSON.stringify({ hash: digest(draft), at: new Date().toISOString() }), { mode: 0o600 });
+  }
+  async previewed(id) { return this.maybe(id, 'preview.json'); }
   async approved(draft) {
     let approval;
     try { approval = JSON.parse(await fs.readFile(this.file(draft.id, 'approval.json'), 'utf8')); }

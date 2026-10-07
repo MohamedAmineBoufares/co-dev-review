@@ -18,7 +18,7 @@ Assistant:  checks out MR 306 in a separate worktree · runs tsc + eslint · lis
 - **It's light on context.** Responses are compact and shaped for review, without the providers' raw payloads. Mechanical steps can run on a cheaper subagent, so the reviewer's context is kept for the code.
 - **It reviews like a senior.** Rubrics for correctness (edge cases traced through each function, guarantees lost in removed lines), complexity (realistic n, derived Big O), design (duplicated helpers, smells that cause bugs) and tests are applied to every change. React/TypeScript, .NET, security and build rubrics add the specifics.
 - **It can't skip work silently.** Every changed hunk needs a verdict. The compiler and call-site passes must have run on the exact commit under review, or the draft must say why they were skipped. A blocker must be `confirmed`.
-- **Nothing is posted without you.** Drafts are approved by you, in a form inside the assistant, in a local browser page, or in a terminal. The model cannot approve.
+- **Nothing is posted without you.** You approve each draft in the chat (`approve all except R2`), or, if you prefer, in a form, a local browser page or the terminal. Your words are recorded with the approval.
 - **It works with any LLM.** The server has no model dependency, and every MCP client works.
 
 ## Quick start
@@ -68,13 +68,13 @@ In assistants that load skills (Claude Code, Codex, Copilot), the `review-mr` sk
 
 ### Approving what gets posted
 
-When the assistant has prepared the comments or tasks, you're asked right away:
+When the comments or tasks are ready, the assistant shows them right in the chat. Each one shows its severity, `file:line`, the code it lands on and the text. You reply:
 
-- **in the assistant**, as a form with one checkbox per item (Claude Code 2.1.76+, Codex);
-- otherwise **in your browser**, on a local page where you can also edit the text;
-- otherwise **in a terminal**, with `co-dev-review approve`.
+> approve all except R2
 
-Untick what you don't want and choose "post now". See [Approval and safety](docs/approval-and-safety.md).
+Only what you named is posted. You can also say `approve R1 R3`, add `later` to approve without posting, or ask to reword an item first. If you'd rather approve outside the chat (a form, a local browser page or the terminal), set `REVIEW_APPROVAL`. See [Approval and safety](docs/approval-and-safety.md).
+
+Before a review, the assistant also asks how deep to go: **diff only** (fast, cheap) or a **local worktree** with the compiler, linters and tests. For a worktree, it asks which package manager to use; when the MR doesn't touch dependencies, your own `node_modules` are linked in seconds.
 
 ## Supported assistants
 
@@ -102,6 +102,7 @@ Any other MCP client works with a manual entry from [`examples/`](examples/).
 | `co-dev-review doctor` | Check credentials and connectivity (read-only) |
 | `co-dev-review approve [draft]` | Approve a draft in the terminal |
 | `co-dev-review pending` | List drafts and their state |
+| `co-dev-review worktrees [remove <n>]` | List or safely remove review worktrees |
 | `co-dev-review trace` | Show what the last reviews actually did |
 | `co-dev-review uninstall` | Remove the registrations and skill links |
 | `co-dev-review help` | All commands and options |

@@ -46,14 +46,25 @@ The server only names the expertise. The text lives in `skills/*/SKILL.md`. Clie
 
 ## The review worktree
 
+By default the assistant **asks before checking out**. `read` returns a `checkoutPlan` with the policy (`REVIEW_CHECKOUT`: `ask`, `always` or `never`), the package manager detected from your checkout's lockfile, and whether a worktree for this MR already exists. You choose:
+
+- **Diff only:** faster and fewer tokens. The review reads the GitLab/GitHub diff, and the compiler, linter and test passes are declared skipped.
+- **Worktree:** the full evidence, with the package manager you pick.
+
 `step=checkout` with a remote target:
 
 1. Fetches `refs/merge-requests/<n>/head` (GitHub: `refs/pull/<n>/head`) and the target branch from `REVIEW_REMOTE` (default `origin`).
 2. Checks that the remote really is the reviewed project, and that the fetched commit is the review head.
 3. Creates or moves a detached worktree beside `REVIEW_REPO_ROOT`, named `<name>-review-mr<n>`. Your own checkout and branch are never touched.
-4. Installs dependencies when `node_modules` is missing or the lockfile changed: `pnpm install --frozen-lockfile --prefer-offline --ignore-scripts`, or the npm/yarn equivalent. Lifecycle scripts are skipped because the reviewed change controls them.
+4. Gets dependencies, with `packageManager`:
+   - `auto` (default): **links** your checkout's `node_modules` folders into the worktree when the change touches neither the lockfile nor any `package.json`, which takes seconds. Otherwise it installs with the lockfile's manager.
+   - `link`: only links, and refuses when dependencies changed.
+   - `pnpm`, `npm`, `yarn`: a separate install (`--frozen-lockfile --prefer-offline --ignore-scripts` or the equivalent). Lifecycle scripts are skipped because the reviewed change controls them.
+   - `none`: source only.
 
-`checks` and `blast_radius` given the same target then run in that worktree against the review's base commit. `read_file` at that head reads from disk instead of the API. The server only moves worktrees it created, and refuses one with local modifications. Remove a worktree with `git worktree remove <path>` once the MR is merged.
+   With links, workspace packages resolve to your checkout's versions; choose an install when an MR changes a shared package that other packages consume.
+
+`checks` and `blast_radius` given the same target then run in that worktree against the review's base commit. `read_file` at that head reads from disk instead of the API. The server only moves worktrees it created, and refuses one with local modifications. List review worktrees with `co-dev-review worktrees`, and remove one with `co-dev-review worktrees remove <MR number>` once the MR is merged. It unlinks the borrowed `node_modules` first; a plain `git worktree remove --force` could delete through those links into your checkout.
 
 ## Checks: the compiler pass
 
