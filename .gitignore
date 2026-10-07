@@ -1,5 +1,12 @@
+# dependencies
 node_modules/
+
+# local state: configuration with tokens, drafts, trace (older installs)
 .local/
 .env
+
+# tooling
 coverage/
 *.log
+*.tgz
+.DS_Store

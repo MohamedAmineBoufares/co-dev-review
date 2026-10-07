@@ -27,7 +27,7 @@ export class Providers {
   async review(target) {
     const gl = target.provider === 'gitlab';
     const raw = await this.client(target.provider).request(`${this.repo(target)}/${gl ? 'merge_requests' : 'pulls'}/${target.number}`);
-    return { target, title: raw.title, description: raw.description ?? raw.body, url: raw.web_url ?? raw.html_url, head: gl ? raw.sha : raw.head.sha, sourceBranch: gl ? raw.source_branch : raw.head?.ref, refs: gl ? raw.diff_refs : { base_sha: raw.base.sha, head_sha: raw.head.sha }, state: raw.state, raw };
+    return { target, title: raw.title, description: raw.description ?? raw.body, url: raw.web_url ?? raw.html_url, head: gl ? raw.sha : raw.head.sha, sourceBranch: gl ? raw.source_branch : raw.head?.ref, targetBranch: gl ? raw.target_branch : raw.base?.ref, refs: gl ? raw.diff_refs : { base_sha: raw.base.sha, head_sha: raw.head.sha }, state: raw.state, raw };
   }
   async diffs(target, page = 1) {
     const gl = target.provider === 'gitlab';
@@ -60,6 +60,17 @@ export class Providers {
   async ticketComments(id, continuationToken) {
     return this.client('azure').request(`/${this.azureProject()}/_apis/wit/workItems/${id}/comments`, { query: { 'api-version': '7.1-preview.4', '$top': 100, continuationToken } });
   }
+  async queryTickets(wiql) {
+    return this.client('azure').request(`/${this.azureProject()}/_apis/wit/wiql`, { method: 'POST', query: { 'api-version': '7.1' }, body: { query: wiql } });
+  }
+  async runSavedQuery(queryId) {
+    return this.client('azure').request(`/${this.azureProject()}/_apis/wit/wiql/${e(queryId)}`, { query: { 'api-version': '7.1' } });
+  }
+  async ticketsByIds(ids) {
+    if (!ids.length) return { value: [] };
+    const fields = ['System.Id', 'System.Title', 'System.WorkItemType', 'System.State', 'System.AssignedTo', 'System.Tags', 'System.AreaPath', 'System.IterationPath', 'System.ChangedDate'];
+    return this.client('azure').request(`/${this.azureProject()}/_apis/wit/workitems`, { query: { ids: ids.join(','), fields: fields.join(','), 'api-version': '7.1' } });
+  }
   async createTask(parent, task) {
     const body = [
       { op: 'add', path: '/fields/System.Title', value: task.title },
@@ -67,7 +78,12 @@ export class Providers {
       { op: 'add', path: '/relations/-', value: { rel: 'System.LinkTypes.Hierarchy-Reverse', url: `${this.config.AZURE_DEVOPS_ORG_URL.replace(/\/$/, '')}/_apis/wit/workItems/${parent.id}` } },
     ];
     for (const key of ['System.AreaPath', 'System.IterationPath']) if (parent.fields[key]) body.push({ op: 'add', path: `/fields/${key}`, value: parent.fields[key] });
-    if (task.remainingWork !== undefined) body.push({ op: 'add', path: '/fields/Microsoft.VSTS.Scheduling.RemainingWork', value: task.remainingWork });
+    if (task.estimatedHours !== undefined) {
+      body.push({ op: 'add', path: '/fields/Microsoft.VSTS.Scheduling.OriginalEstimate', value: task.estimatedHours });
+      body.push({ op: 'add', path: '/fields/Microsoft.VSTS.Scheduling.RemainingWork', value: task.estimatedHours });
+    }
+    const assignedTo = task.assignedTo || this.config.AZURE_DEVOPS_ASSIGNEE;
+    if (assignedTo) body.push({ op: 'add', path: '/fields/System.AssignedTo', value: assignedTo });
     return this.client('azure').request(`/${this.azureProject()}/_apis/wit/workitems/$Task`, { method: 'POST', contentType: 'application/json-patch+json', query: { 'api-version': '7.1' }, body });
   }
   async sonar(kind, { project, pullRequest, branch, page = 1 }) {

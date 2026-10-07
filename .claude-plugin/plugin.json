@@ -1,20 +1,24 @@
 {
   "name": "co-dev-review",
   "displayName": "Co-dev review",
-  "version": "1.1.0",
-  "description": "Evidence-based MR/PR review, Azure ticket decomposition and Sonar triage, with domain rubrics for React/TypeScript/Vite and .NET and human-approved publication.",
+  "version": "1.4.0",
+  "description": "Senior-level MR/PR code review, Azure DevOps task planning and Sonar triage over MCP, with deterministic checks, domain rubrics and human-approved publication.",
   "author": {
     "name": "Mohamed Amine Boufares"
   },
   "keywords": [
     "code-review",
+    "mcp",
     "gitlab",
+    "github",
     "azure-devops",
     "sonarqube",
     "react",
+    "typescript",
     "dotnet"
   ],
   "license": "MIT",
   "mcpServers": "./plugin-mcp.json",
-  "repository": "https://github.com/<your-account>/co-dev-review"
+  "homepage": "https://github.com/MohamedAmineBoufares/co-dev-review",
+  "repository": "https://github.com/MohamedAmineBoufares/co-dev-review"
 }

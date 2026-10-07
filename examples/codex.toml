@@ -1,4 +1,6 @@
 [mcp_servers.co_dev_review]
 command = "node"
 args = ["/absolute/path/to/co-dev-review/src/server.js"]
-startup_timeout_sec = 20
+startup_timeout_sec = 30
+# checkout installs dependencies and checks type-checks the workspace: well over the 60 s default
+tool_timeout_sec = 900

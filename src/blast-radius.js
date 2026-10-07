@@ -46,7 +46,7 @@ export async function blastRadius(config, { mode = 'working', base = 'HEAD', max
   const range = mode === 'staged' ? ['--cached'] : mode === 'branch' ? [`${base}...HEAD`] : ['HEAD'];
   const touched = splitUnifiedDiff(await git(['diff', '--no-ext-diff', '--no-textconv', '--unified=0', ...range, '--']));
   const changed = new Set(touched.map(file => file.path));
-  if (!changed.size) return { mode, base, symbols: [], symbolsFound: 0, symbolsInspected: 0, note: 'No changed files in this range, so no symbols were examined. If a change was expected, the checkout is on the wrong branch or the base is wrong.' };
+  if (!changed.size) return { mode, base, changedFileCount: 0, symbols: [], symbolsFound: 0, symbolsInspected: 0, note: 'No changed files in this range, so no symbols were examined. If a change was expected, the checkout is on the wrong branch or the base is wrong.' };
 
   const candidates = [];
   for (const file of touched) {
@@ -79,7 +79,7 @@ export async function blastRadius(config, { mode = 'working', base = 'HEAD', max
   }
 
   return {
-    mode, base, symbols, symbolsFound: unique.length, symbolsInspected: symbols.length,
+    mode, base, changedFileCount: changed.size, symbols, symbolsFound: unique.length, symbolsInspected: symbols.length,
     note: 'Callers listed here are outside the diff and were not reviewed. For each changed signature, contract or behaviour, check whether these call sites still hold. A symbol with zero callers may be new, dead, or reached dynamically. Text matching cannot resolve overloads, re-exports or dynamic dispatch.',
   };
 }

@@ -58,6 +58,10 @@ test('changed paths route to the rubrics that must be loaded', () => {
   const ids = rubrics.map(x => x.id);
   assert.ok(ids.includes('react-ts') && ids.includes('dotnet') && ids.includes('dotnet-api') && ids.includes('build'));
   assert.ok(ids.includes('security'), 'an auth path must pull in the security rubric');
+  assert.ok(['correctness', 'complexity', 'design'].every(id => ids.includes(id)), 'every code change gets the stack-independent senior passes');
+  assert.ok(ids.includes('tests-missing'), 'code changed with no test changed must be looked at');
+  assert.ok(!suggestRubrics(['src/App.tsx', 'src/App.test.tsx']).rubrics.some(x => x.id === 'tests-missing'));
+  assert.ok(!suggestRubrics(['vite.config.json', 'README.md']).rubrics.some(x => x.id === 'correctness'), 'config and docs do not get the code passes');
   assert.deepEqual(suggestRubrics(['notes.txt']).rubrics, []);
   assert.deepEqual(suggestRubrics(['notes.txt']).unmatched, ['notes.txt']);
 });
@@ -103,11 +107,11 @@ test('trace summaries carry names and counts only, never bodies', () => {
   const read = summarize('review_work', { request: { step: 'read', target: { provider: 'gitlab', project: 'g/r', number: 7 } } }, {
     changes: { data: [{ new_path: 'a.tsx' }] }, hunks: [{ path: 'a.tsx' }, { path: 'a.tsx' }], page: 1,
     rubrics: { rubrics: [{ id: 'react-ts', skill: 'review-react-ts' }, { id: 'typescript', skill: 'review-react-ts' }, { id: 'tests', skill: null }] },
-    repoSkills: { skills: [{ name: 'house-conventions' }] }, localCheckout: { branch: 'release', matchesReview: false },
+    repoSkills: { skills: [{ name: 'house-style' }] }, localCheckout: { branch: 'release', matchesReview: false },
   });
   assert.equal(read.target, 'gitlab g/r #7');
   assert.deepEqual(read.rubricsOffered, ['review-react-ts', 'tests (no packaged skill)'], 'one skill serving two rubric ids is listed once');
-  assert.deepEqual(read.repoSkillsOffered, ['house-conventions']);
+  assert.deepEqual(read.repoSkillsOffered, ['house-style']);
   assert.match(read.checkout, /MISMATCH: local is on release/);
   const prepared = summarize('review_work', { request: { step: 'prepare_comments', target: { provider: 'gitlab', number: 7 } } }, {
     draft: { id: 'abc', target: { provider: 'gitlab', number: 7 }, items: [{ severity: 'blocker', body: 'SECRET BODY' }, { severity: 'minor', body: 'x' }], coverage: { hunkCount: 3, claims: [{}, {}] }, rubricsApplied: ['review-react-ts'] },

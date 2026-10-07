@@ -1,13 +1,15 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { parse, printParseErrorCode } from 'jsonc-parser';
+#!/usr/bin/env node
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { configKeys, loadConfig, localDir } from './config.js';
+import { loadConfig, localDir } from './config.js';
 import { Store, digest } from './store.js';
-import { Providers } from './providers.js';
 import { safe, style, parseSelection, renderItem, renderHeader, editInEditor } from './review-ui.js';
 import { readTrace } from './trace.js';
+import { doctor } from './doctor.js';
+import { init, uninstall, importConfig } from './init.js';
+import { clients } from './clients.js';
+import { linkSkills } from './skill-links.js';
+import { relaunchWithExtraCa } from './ca.js';
 
 // One line per server call, grouped by what was being reviewed, so a review's protocol is
 // readable at a glance: what was offered, what was fetched, what was run, what was declared.
@@ -28,11 +30,16 @@ function renderTrace(events) {
             + `\n${' '.repeat(29)}offered rubrics: ${list(e.rubricsOffered)}\n${' '.repeat(29)}offered repo skills: ${list(e.repoSkillsOffered)}`;
         break;
       case 'rubric': detail = `fetched via tool: ${style.green(list(e.fetched))}${e.missing?.length ? style.yellow(`  missing: ${e.missing.join(', ')}`) : ''}`; break;
+      case 'checkout': detail = `head ${e.head ?? '?'}${e.reused ? ' · reused worktree' : ' · new worktree'} · install ${e.install ?? '?'}`; break;
       case 'checks': detail = `${style.dim(e.scope ?? '')}  ` + (e.changedFiles === 0 ? style.yellow('no changed files in range') : Object.entries(e.runners ?? {}).map(([n, s]) => `${n} ${s}`).join(' · ') || style.dim('no runners')); break;
       case 'blast_radius': detail = `${style.dim(e.scope ?? '')}  ${e.symbols} symbol(s), ${e.callers} caller(s) outside the diff`; break;
       case 'read_file': detail = safe(e.path); break;
-      case 'prepare_comments': detail = `draft ${e.draft?.slice(0, 8)} · ${e.items} item(s) ${Object.entries(e.severities ?? {}).map(([s, n]) => `${n} ${s}`).join(', ')} · ${e.coverage}\n${' '.repeat(29)}declared applied: ${e.declared?.length ? style.green(e.declared.map(safe).join(', ')) : style.yellow('none')}`; break;
-      case 'prepare': detail = `draft ${e.draft?.slice(0, 8)} · ${e.tasks} task(s) · ${e.totalHours} h`; break;
+      case 'prepare_comments': detail = `draft ${e.draft?.slice(0, 8)} · ${e.items} item(s) ${Object.entries(e.severities ?? {}).map(([s, n]) => `${n} ${s}`).join(', ')} · ${e.coverage}\n${' '.repeat(29)}declared applied: ${e.declared?.length ? style.green(e.declared.map(safe).join(', ')) : style.yellow('none')}`
+        + (e.approval ? `
+${' '.repeat(29)}approval: ${e.approval}` : '')
+        + (e.deterministic ? `\n${' '.repeat(29)}deterministic: ${Object.entries(e.deterministic).map(([pass, how]) => how === 'run' ? style.green(`${pass} run`) : style.yellow(`${pass} skipped`)).join(', ')}` : ''); break;
+      case 'prepare': detail = `draft ${e.draft?.slice(0, 8)} · ${e.tasks} task(s) · ${e.totalHours} h${e.approval ? ` · approval ${e.approval}` : ''}`; break;
+      case 'request_approval': detail = `draft ${e.draft?.slice(0, 8)} · approval ${e.approval ?? '?'}`; break;
       case 'publish': detail = `draft ${e.draft?.slice(0, 8)} · ${e.posted} posted`; break;
       case 'view_draft': detail = `draft ${e.draft?.slice(0, 8)}`; break;
       default: detail = '';
@@ -105,66 +112,67 @@ async function approve(store, reference) {
   } finally { rl.close(); }
 }
 
+const HELP = `co-dev-review <command>
+
+  serve                      start the MCP server on stdio (what assistants launch)
+  init [--clients a,b] [--yes] [--no-config] [--no-skills] [--import mcp.json] [--force]
+                             configure credentials, check them, register the server in every
+                             detected assistant and link the skills
+  uninstall [--clients a,b]  remove the registrations and skill links (state is kept)
+  doctor                     check credentials and connectivity, read-only
+  approve [draft]            inspect and approve a draft in this terminal
+  pending                    list drafts and their state
+  trace [n]                  what the last reviews actually did
+  link-skills [client...] [--dry-run] [--force]
+  import-config <mcp.json>   import allowlisted settings from another MCP configuration
+  reconcile <draft> <item> posted <remote-id> | not-posted
+
+Assistants: ${clients.map(c => c.id).join(', ')}`;
+
 async function main() {
   const [command, arg, itemId, resolution, remoteId] = process.argv.slice(2);
+  const rest = process.argv.slice(3);
+  // The server handles its own CA relaunch; importing it starts it.
+  if (command === 'serve') { await import('./server.js'); return; }
+  if (!command || command === 'help' || command === '--help' || command === '-h') { console.log(HELP); return; }
+  const relaunched = relaunchWithExtraCa(loadConfig());
+  if (relaunched) { process.exitCode = await relaunched; return; }
   const store = new Store();
+  if (command === 'init' || command === 'setup') return init(rest);
+  if (command === 'uninstall') return uninstall(rest);
   if (command === 'import-config') {
-    if (!arg) throw new Error('Usage: npm run import-config -- <path-to-mcp.json>');
-    const errors = [];
-    const data = parse(await fs.readFile(arg, 'utf8'), errors, { allowTrailingComma: true });
-    if (errors.length) throw new Error(`Invalid JSONC: ${printParseErrorCode(errors[0].error)}`);
-    const imported = {};
-    for (const server of Object.values(data.servers || data.mcpServers || {})) {
-      for (const [key, value] of Object.entries(server.env || {})) {
-        if (configKeys.includes(key) && typeof value === 'string' && value && !value.includes('${')) {
-          if (imported[key] && imported[key] !== value) throw new Error(`Conflicting values for ${key}; configure it manually`);
-          imported[key] = value;
-        }
-      }
-    }
-    await fs.mkdir(localDir, { recursive: true, mode: 0o700 });
-    const file = path.join(localDir, 'config.json');
-    let previous = {};
-    try { previous = JSON.parse(await fs.readFile(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    await fs.writeFile(file, JSON.stringify({ ...previous, ...imported }, null, 2), { mode: 0o600 });
-    console.log(`Imported keys only: ${Object.keys(imported).join(', ')}\nSaved to ignored .local/config.json. No server commands or unrelated integrations were imported.`);
+    if (!arg) throw new Error('Usage: co-dev-review import-config <path-to-mcp.json>');
+    console.log(`Imported keys only: ${importConfig(arg).join(', ') || 'none'}\nSaved to ${localDir}. No server commands or unrelated integrations were imported.`);
     return;
   }
-  if (command === 'doctor') {
-    const config = loadConfig();
-    const providers = new Providers(config);
-    const checks = [
-      ['GitLab', config.GITLAB_TOKEN, () => providers.client('gitlab').request('/user')],
-      ['GitHub', config.GITHUB_TOKEN, () => providers.client('github').request('/user')],
-      ['Azure DevOps', config.AZURE_DEVOPS_TOKEN, () => providers.client('azure').request(`/_apis/projects/${encodeURIComponent(config.AZURE_DEVOPS_PROJECT)}`, { query: { 'api-version': '7.1' } })],
-      ['SonarQube', config.SONAR_TOKEN, async () => { const result = await providers.client('sonar').request('/api/authentication/validate'); if (!result.valid) throw new Error('Authentication rejected'); }],
-    ];
-    console.log(`Node ${process.version}`);
-    for (const [name, enabled, check] of checks) {
-      if (!enabled) { console.log(`${name}: not configured`); continue; }
-      try { await check(); console.log(`${name}: connected`); }
-      catch (error) { console.log(`${name}: ${error.message}`); process.exitCode = 1; }
+  if (command === 'doctor') { if (!await doctor(loadConfig())) process.exitCode = 1; return; }
+  if (command === 'link-skills') {
+    const wanted = rest.filter(x => !x.startsWith('--'));
+    const dirs = [...new Set(clients.filter(c => c.skills && (wanted.length ? wanted.includes(c.id) : c.detected())).map(c => c.skills))];
+    if (!dirs.length) throw new Error('No assistant with a skills folder found. Name one: claude-code, codex, vscode, copilot-cli');
+    for (const dir of dirs) {
+      const report = linkSkills(dir, { dryRun: rest.includes('--dry-run'), force: rest.includes('--force') });
+      console.log(`${dir}: ${report.linked.length} linked, ${report.unchanged.length} unchanged${report.conflicts.length ? `, left alone (not our link): ${report.conflicts.join(', ')}` : ''}${report.failed.length ? `, failed: ${report.failed.join('; ')}` : ''}`);
     }
-    console.log(config.REVIEW_REPO_ROOT ? `Local checkout: ${config.REVIEW_REPO_ROOT}` : 'Local checkout: not configured (step=checks and step=blast_radius are unavailable)');
     return;
   }
   if (command === 'pending') {
     const drafts = await store.list();
     if (!drafts.length) { console.log('No drafts.'); return; }
     drafts.forEach((draft, index) => console.log(renderDraftLine(draft, index + 1) + '\n'));
-    console.log(style.dim('Approve one with: npm run approve -- <first 8 characters>'));
+    console.log(style.dim('Approve one with: co-dev-review approve <first 8 characters>'));
     return;
   }
   if (command === 'approve') return approve(store, arg);
   if (command === 'trace') {
     const events = readTrace(arg ? Number(arg) : 60);
-    if (!events.length) { console.log('No trace yet. Run a review through the server first; every tool call is recorded in .local/trace.jsonl.'); return; }
+    if (!events.length) { console.log(`No trace yet. Run a review through the server first; every tool call is recorded in ${localDir}/trace.jsonl.`); return; }
     console.log(renderTrace(events));
     console.log(style.dim('\nSkills a client loads natively (Claude Code Skill tool, Codex skills) and files read with the host\'s own tools do not pass through this server. "offered" is what the server returned, "fetched via tool" is what came through step=rubric, "declared applied" is the assistant\'s own statement at prepare time.'));
     return;
   }
   if (command === 'reconcile') {
-    if (!['posted', 'not-posted'].includes(resolution)) throw new Error('Usage: node src/cli.js reconcile <draft-id> <item-id> posted <remote-id> | not-posted');
+    if (!['posted', 'not-posted'].includes(resolution)) throw new Error('Usage: co-dev-review reconcile <draft-id> <item-id> posted <remote-id> | not-posted');
     const rl = interactive();
     try {
       const id = await store.resolve(arg);
@@ -184,6 +192,6 @@ async function main() {
     } finally { rl.close(); }
     return;
   }
-  throw new Error('Commands: import-config <file>, doctor, pending, approve [draft-id], trace [n], reconcile <draft-id> <item-id> posted <remote-id>|not-posted');
+  throw new Error(`Unknown command "${command}".\n\n${HELP}`);
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -30,22 +30,28 @@ export function summarize(tool, args, result, error) {
         rubricsOffered: [...new Set(result?.rubrics?.rubrics?.map(r => r.skill ?? `${r.id} (no packaged skill)`) ?? [])],
         repoSkillsOffered: result?.repoSkills?.skills?.map(s => s.name),
         gate: result?.sonar?.gate?.data?.projectStatus?.status,
-        checkout: result?.localCheckout ? (result.localCheckout.matchesReview ? 'matches review head' : `MISMATCH: local is on ${result.localCheckout.branch}`) : undefined };
+        checkout: result?.localCheckout ? (result.localCheckout.worktree?.matchesReview ? 'review worktree at head' : result.localCheckout.matchesReview ? 'matches review head' : `MISMATCH: local is on ${result.localCheckout.branch}`) : undefined };
+    case 'checkout':
+      return { ...entry, head: result?.head?.slice(0, 12), reused: result?.reused, install: result?.install?.status };
     case 'rubric':
       return { ...entry, fetched: result?.rubrics?.map(r => `${r.source}:${r.name}`), missing: result?.missing };
     case 'checks':
-      return { ...entry, scope: `${result?.mode} vs ${result?.base}`, changedFiles: result?.changedFileCount, runners: Object.fromEntries(Object.entries(result?.runners ?? {}).map(([name, r]) => [name, r.status === 'ran' ? `${r.onChangedLines?.length ?? 0} on changed lines` : r.status])) };
+      return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, changedFiles: result?.changedFileCount, runners: Object.fromEntries(Object.entries(result?.runners ?? {}).map(([name, r]) => [name, r.status === 'ran' ? `${r.onChangedLines?.length ?? 0} on changed lines` : r.status])) };
     case 'blast_radius':
-      return { ...entry, scope: `${result?.mode} vs ${result?.base}`, symbols: result?.symbolsInspected, callers: result?.symbols?.reduce((n, s) => n + s.callerCount, 0) };
+      return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, symbols: result?.symbolsInspected, callers: result?.symbols?.reduce((n, s) => n + s.callerCount, 0) };
     case 'read_file':
       return { ...entry, path: args.request.path };
     case 'prepare_comments':
       return { ...entry, draft: result?.draft?.id, items: result?.draft?.items?.length,
         severities: Object.fromEntries(['blocker', 'major', 'minor', 'suggestion'].map(s => [s, result?.draft?.items?.filter(i => i.severity === s).length ?? 0]).filter(([, n]) => n)),
         coverage: result?.draft?.coverage ? `${result.draft.coverage.claims.length} claim(s) over ${result.draft.coverage.hunkCount} hunks` : undefined,
-        declared: result?.draft?.rubricsApplied };
+        declared: result?.draft?.rubricsApplied,
+        approval: result?.approval ? `${result.approval.via} ${result.approval.status}` : undefined,
+        deterministic: result?.draft?.deterministic && Object.fromEntries(Object.entries(result.draft.deterministic).map(([pass, x]) => [pass, x.runId ? 'run' : 'skipped'])) };
     case 'prepare':
-      return { ...entry, draft: result?.draft?.id, tasks: result?.draft?.items?.length, totalHours: result?.totalEstimatedHours };
+      return { ...entry, draft: result?.draft?.id, tasks: result?.draft?.items?.length, totalHours: result?.totalEstimatedHours, approval: result?.approval ? `${result.approval.via} ${result.approval.status}` : undefined };
+    case 'request_approval':
+      return { ...entry, draft: args.request.draftId, approval: result?.approval ? `${result.approval.via} ${result.approval.status}` : undefined };
     case 'view_draft':
       return { ...entry, draft: args.request.draftId };
     case 'publish':

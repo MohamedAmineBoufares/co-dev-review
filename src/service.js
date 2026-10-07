@@ -1,6 +1,7 @@
 import { Store, digest } from './store.js';
 import { Providers } from './providers.js';
 import { ledger, coverageGaps, anchorContext } from './hunks.js';
+import { Runs, verifyDeterministic } from './runs.js';
 
 // Added/deleted line anchors only; ambiguous context lines are deliberately rejected.
 export function anchors(patch = '') {
@@ -18,12 +19,13 @@ export function anchors(patch = '') {
   return { LEFT: left, RIGHT: right };
 }
 export class Service {
-  constructor(config, { providers = new Providers(config), store = new Store() } = {}) { this.providers = providers; this.store = store; }
-  async reviewDraft({ target, language, items, coverage = [], rubricsApplied = [] }) {
+  constructor(config, { providers = new Providers(config), store = new Store(), runs = new Runs() } = {}) { this.providers = providers; this.store = store; this.runs = runs; }
+  async reviewDraft({ target, language, items, coverage = [], rubricsApplied = [], deterministic }) {
     target = { ...target, project: target.project || this.providers.config.GITLAB_PROJECT_ID };
     const snapshot = await this.providers.review(target);
     if (!['opened', 'open'].includes(snapshot.state)) throw new Error('Review is not open');
     if (!snapshot.head) throw new Error('Review has no head commit');
+    const evidence = await verifyDeterministic(this.runs, deterministic, snapshot);
     const files = [];
     let complete = false;
     for (let page = 1; page <= 30; page++) {
@@ -49,7 +51,7 @@ export class Service {
     if (current.head !== snapshot.head) throw new Error('Review changed while loading diffs; retry');
     return this.store.create({ kind: 'review', language, target, destination: this.providers.destination(target),
       snapshot: { head: snapshot.head, refs: snapshot.refs, title: snapshot.title, url: snapshot.url },
-      coverage: { hunkCount: entries.length, claims: coverage }, rubricsApplied,
+      coverage: { hunkCount: entries.length, claims: coverage }, rubricsApplied, deterministic: evidence,
       // Captured now so approval can show the code a comment lands on, without a second fetch.
       items: items.map((x, i) => ({ ...x, id: `R${i + 1}`, context: x.path ? anchorContext(files, x.path, x.line, x.side) : undefined })) });
   }

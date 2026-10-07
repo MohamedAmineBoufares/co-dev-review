@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { localDir } from './config.js';
+import { localDir, loadConfig } from './config.js';
 
 // Strip terminal control characters from all untrusted review/ticket content before styling it.
 export const safe = value => String(value).replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '');
@@ -42,11 +42,15 @@ function renderContext(context) {
 
 export function renderItem(item, position) {
   const head = item.severity
-    ? `${(SEVERITY[item.severity] || style.grey)(item.severity.toUpperCase())} ${item.path ? style.bold(`${safe(item.path)}:${item.line}`) : style.dim('general comment')}`
+    ? `${(SEVERITY[item.severity] || style.grey)(item.severity.toUpperCase())}${item.confidence ? style.dim(` (${safe(item.confidence)})`) : ''} ${item.path ? style.bold(`${safe(item.path)}:${item.line}`) : style.dim('general comment')}`
     : style.bold(safe(item.title));
   const lines = [`${style.bold(`[${position}]`)} ${style.dim(item.id)}  ${head}`];
   if (item.path) lines.push(renderContext(item.context), style.grey('   ─────'));
-  if (item.estimatedHours !== undefined) lines.push(style.dim(`   estimate: ${item.estimatedHours} h`));
+  if (item.estimatedHours !== undefined) {
+    // Publication resolves the assignee the same way: the task's own value, else AZURE_DEVOPS_ASSIGNEE.
+    const assignee = item.assignedTo || process.env.AZURE_DEVOPS_ASSIGNEE || loadConfig().AZURE_DEVOPS_ASSIGNEE;
+    lines.push(style.dim(`   estimate: ${item.estimatedHours} h → Original Estimate / Remaining Work`), assignee ? style.dim(`   assigned to: ${safe(assignee)}`) : style.yellow('   assigned to: nobody (set AZURE_DEVOPS_ASSIGNEE or give the task an assignedTo)'));
+  }
   lines.push(indent(item.body ?? item.description));
   return lines.join('\n');
 }
@@ -62,11 +66,18 @@ export function renderHeader(draft) {
   const applied = draft.kind === 'review' && Array.isArray(draft.rubricsApplied)
     ? (draft.rubricsApplied.length ? style.grey(`  rubrics applied: ${draft.rubricsApplied.map(safe).join(', ')}`) : style.yellow('  rubrics applied: none declared'))
     : '';
+  // Verified by the server against the review head, unlike rubricsApplied; a skip carries the assistant's reason.
+  const passes = draft.kind === 'review' && draft.deterministic
+    ? Object.entries(draft.deterministic).map(([pass, x]) => x.runId
+      ? style.grey(`  ${pass}: ran on this head${x.summary ? ` (${safe(Object.entries(x.summary).map(([k, v]) => `${k} ${v}`).join(', '))})` : ''}`)
+      : style.yellow(`  ${pass}: SKIPPED: ${safe(x.skipped)}`)).join('\n')
+    : '';
   return [
     `${style.bold(draft.kind === 'review' ? 'Review comments' : 'Tasks')} ${style.dim(draft.id.slice(0, 8))}  ${safe(where)}`,
     title ? style.dim(`  ${safe(title)}`) : '',
     style.grey(`  ${facts.join(' · ')}`),
     applied,
+    passes,
     draft.snapshot?.url ? style.grey(`  ${safe(draft.snapshot.url)}`) : '',
   ].filter(Boolean).join('\n');
 }

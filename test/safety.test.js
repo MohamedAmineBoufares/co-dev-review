@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, digest } from '../src/store.js';
 import { Service, anchors } from '../src/service.js';
+import { Runs } from '../src/runs.js';
 
+const skippedPasses = { checks: { skipped: 'No local checkout of this repository.' }, blastRadius: { skipped: 'No local checkout of this repository.' } };
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'co-dev-test-'));
   t.after(async () => {
@@ -23,9 +25,10 @@ async function fixture(t) {
     ticket: async () => ({ id: 3, rev: 1 + state.posts.length, fields: { 'System.WorkItemType': 'Bug', 'System.Title': 'Bug' } }),
     createTask: async (_parent, item) => { state.posts.push(item); return { id: state.posts.length }; },
   };
-  const service = new Service({}, { store, providers });
-  const draft = () => service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'fr', items: [{ body: 'Corriger ce défaut.', severity: 'blocker', path: 'new.js', line: 1, side: 'RIGHT' }, { body: 'Suggestion facultative.', severity: 'minor' }], coverage: [{ hunks: '1.1', verdict: 'finding' }] });
-  return { store, state, providers, service, draft };
+  const runs = new Runs(path.join(root, 'runs'));
+  const service = new Service({}, { store, providers, runs });
+  const draft = () => service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'fr', items: [{ body: 'Corriger ce défaut.', severity: 'blocker', path: 'new.js', line: 1, side: 'RIGHT' }, { body: 'Suggestion facultative.', severity: 'minor' }], coverage: [{ hunks: '1.1', verdict: 'finding' }], deterministic: skippedPasses });
+  return { store, state, providers, service, draft, runs };
 }
 test('unapproved drafts cannot publish', async t => {
   const { service, draft, state } = await fixture(t);
@@ -74,7 +77,7 @@ test('uncertain remote writes are never retried automatically', async t => {
 });
 test('invalid diff lines are rejected before saving', async t => {
   const { service } = await fixture(t);
-  await assert.rejects(service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', path: 'new.js', line: 2, side: 'RIGHT' }], coverage: [{ hunks: '1.1', verdict: 'finding' }] }), /Invalid or unavailable/);
+  await assert.rejects(service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', path: 'new.js', line: 2, side: 'RIGHT' }], coverage: [{ hunks: '1.1', verdict: 'finding' }], deterministic: skippedPasses }), /Invalid or unavailable/);
 });
 test('diff parser handles content starting with plus/minus characters', () => {
   const a = anchors('--- a/x\n+++ b/x\n@@ -4,2 +9,2 @@\n---old\n+++new\n same');
@@ -101,7 +104,7 @@ test('draft paths cannot escape the store', async t => {
 });
 test('a draft that leaves part of the diff unaccounted for is rejected', async t => {
   const { service } = await fixture(t);
-  await assert.rejects(service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', coverage: [],
+  await assert.rejects(service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', coverage: [], deterministic: skippedPasses,
     items: [{ body: 'x', severity: 'minor', path: 'new.js', line: 1, side: 'RIGHT' }] }), /No verdict for 1 of 1 hunks/);
 });
 test('approved review comments keep the diff context shown at approval time', async t => {
@@ -111,4 +114,72 @@ test('approved review comments keep the diff context shown at approval time', as
   assert.match(d.items[0].context.snippet, /\+new/);
   assert.equal(d.coverage.hunkCount, 1);
   assert.deepEqual(d.rubricsApplied, [], 'an undeclared rubric list is stored as empty, never omitted, so approval can show it');
+});
+
+test('a draft must carry deterministic evidence or an explicit skip', async t => {
+  const { service } = await fixture(t);
+  const request = { target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor' }], coverage: [{ hunks: '1.1', verdict: 'reviewed-clean' }] };
+  await assert.rejects(service.reviewDraft(request), /deterministic.checks is required/);
+  const d = await service.reviewDraft({ ...request, deterministic: skippedPasses });
+  assert.equal(d.deterministic.checks.skipped, skippedPasses.checks.skipped, 'a skip reason reaches the approver');
+});
+test('only runs on the review head and base count as deterministic evidence', async t => {
+  const { service, runs, state } = await fixture(t);
+  const request = { target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor' }], coverage: [{ hunks: '1.1', verdict: 'reviewed-clean' }] };
+  const run = (kind, extra = {}) => runs.record({ kind, mode: 'branch', head: state.head, base: 'base', changedFileCount: 1, summary: { tsc: '0 on changed lines' }, ...extra });
+  const good = { checks: { runId: (await run('checks')).id }, blastRadius: { runId: (await run('blast_radius')).id } };
+  const d = await service.reviewDraft({ ...request, deterministic: good });
+  assert.equal(d.deterministic.checks.runId, good.checks.runId);
+  assert.deepEqual(d.deterministic.checks.summary, { tsc: '0 on changed lines' });
+  await assert.rejects(service.reviewDraft({ ...request, deterministic: { ...good, checks: { runId: (await run('checks', { head: 'other' })).id } } }), /not the review head/);
+  await assert.rejects(service.reviewDraft({ ...request, deterministic: { ...good, checks: { runId: (await run('checks', { base: 'develop' })).id } } }), /review's base/);
+  await assert.rejects(service.reviewDraft({ ...request, deterministic: { ...good, checks: { runId: (await run('checks', { mode: 'working' })).id } } }), /review's base/);
+  await assert.rejects(service.reviewDraft({ ...request, deterministic: { ...good, checks: { runId: (await run('checks', { changedFileCount: 0 })).id } } }), /no changed files/);
+  await assert.rejects(service.reviewDraft({ ...request, deterministic: { checks: good.blastRadius, blastRadius: good.blastRadius } }), /not checks/);
+  await assert.rejects(service.reviewDraft({ ...request, deterministic: { ...good, checks: { runId: '11111111-1111-1111-1111-111111111111' } } }), /Unknown run/);
+});
+
+test('in-chat approval posts exactly the ticked items', async t => {
+  const { draft, service, state } = await fixture(t);
+  const { approveInChat } = await import('../src/approval.js');
+  const d = await draft();
+  let form;
+  const mcp = { server: { elicitInput: async params => { form = params; return { action: 'accept', content: { R1: false, R2: true, then: 'publish' } }; } } };
+  const outcome = await approveInChat(mcp, service, d);
+  assert.equal(outcome.status, 'published');
+  assert.deepEqual(outcome.selectedIds, ['R2']);
+  assert.equal(state.posts.length, 1);
+  assert.equal(state.posts[0].id, 'R2');
+  assert.ok(form.requestedSchema.properties.R1.title.includes('BLOCKER'), 'the form names severity and location');
+  assert.match(form.requestedSchema.properties.R1.description, /Corriger/);
+});
+test('a declined in-chat form approves nothing', async t => {
+  const { draft, service, store, state } = await fixture(t);
+  const { approveInChat } = await import('../src/approval.js');
+  const d = await draft();
+  const outcome = await approveInChat({ server: { elicitInput: async () => ({ action: 'decline' }) } }, service, d);
+  assert.equal(outcome.status, 'declined');
+  assert.equal(await store.maybe(d.id, 'approval.json'), null);
+  assert.equal(state.posts.length, 0);
+});
+test('the browser approval page applies edits, posts the selection, and refuses foreign hosts and reuse', async t => {
+  const { draft, service, store, state } = await fixture(t);
+  const { approveInBrowser } = await import('../src/approval.js');
+  const d = await draft();
+  const page = await approveInBrowser(service, d, { open: async () => true });
+  t.after(() => page.close());
+  const { port, pathname } = new URL(page.url);
+  const html = await (await fetch(page.url)).text();
+  assert.match(html, /Corriger ce défaut/);
+  const foreign = await fetch(`http://localhost:${port}${pathname}`);
+  assert.equal(foreign.status, 403, 'a Host other than 127.0.0.1:port is refused (DNS rebinding)');
+  const post = body => fetch(`${page.url}/decision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const done = await (await post({ then: 'publish', selected: ['R1'], edits: { R1: { field: 'body', text: 'Texte corrigé.' } } })).json();
+  assert.match(done.message, /1 posted/);
+  assert.equal(state.posts.length, 1);
+  assert.equal(state.posts[0].body, 'Texte corrigé.');
+  assert.equal((await store.maybe(d.id, 'approval.json')).via, 'browser');
+  const reuse = await post({ then: 'publish', selected: ['R2'] }).then(response => response.status, () => 'closed');
+  assert.notEqual(reuse, 200, 'the page is single-use');
+  assert.equal(state.posts.length, 1);
 });

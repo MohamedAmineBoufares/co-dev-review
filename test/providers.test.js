@@ -21,14 +21,26 @@ test('GitHub inline comments pin commit and side', async () => {
   assert.equal(calls[0].url.pathname, '/repos/owner/repo/pulls/5/comments');
   assert.equal(calls[0].body.commit_id, 'sha'); assert.equal(calls[0].body.side, 'RIGHT');
 });
-test('Azure task uses JSON Patch and parent hierarchy relation', async () => {
+test('Azure task uses JSON Patch, parent hierarchy relation, and sets estimate fields from estimatedHours', async () => {
   const { providers, calls } = fixture();
-  await providers.createTask({ id: 42, fields: { 'System.AreaPath': 'Area', 'System.IterationPath': 'Iteration' } }, { title: 'Test', description: '<p>Test</p>', remainingWork: 2 });
+  await providers.createTask({ id: 42, fields: { 'System.AreaPath': 'Area', 'System.IterationPath': 'Iteration' } }, { title: 'Test', description: '<p>Test</p>', estimatedHours: 5 });
   assert.equal(calls[0].url.pathname, '/org/My%20Project/_apis/wit/workitems/$Task');
   assert.equal(calls[0].headers['Content-Type'], 'application/json-patch+json');
   assert.equal(calls[0].body[2].value.rel, 'System.LinkTypes.Hierarchy-Reverse');
   assert.equal(calls[0].body[2].value.url, 'https://dev.azure.com/org/_apis/wit/workItems/42');
-  assert.equal(calls[0].body.at(-1).value, 2);
+  const byPath = Object.fromEntries(calls[0].body.filter(op => op.path).map(op => [op.path, op.value]));
+  assert.equal(byPath['/fields/Microsoft.VSTS.Scheduling.OriginalEstimate'], 5);
+  assert.equal(byPath['/fields/Microsoft.VSTS.Scheduling.RemainingWork'], 5);
+  assert.equal(byPath['/fields/System.AssignedTo'], undefined);
+});
+test('Azure task assignee defaults from config and a per-task assignedTo overrides it', async () => {
+  const { providers, calls } = fixture();
+  providers.config.AZURE_DEVOPS_ASSIGNEE = 'default@example.com';
+  await providers.createTask({ id: 1, fields: {} }, { title: 'Default', description: 'd', estimatedHours: 1 });
+  await providers.createTask({ id: 1, fields: {} }, { title: 'Override', description: 'd', estimatedHours: 1, assignedTo: 'dev@example.com' });
+  const assignee = call => call.body.find(op => op.path === '/fields/System.AssignedTo')?.value;
+  assert.equal(assignee(calls[0]), 'default@example.com');
+  assert.equal(assignee(calls[1]), 'dev@example.com');
 });
 test('Sonar preserves PR scope and rejects conflicting branch', async () => {
   const { providers, calls } = fixture(); await providers.sonar('metrics', { pullRequest: '22' });
@@ -43,7 +55,42 @@ test('HTTP errors do not leak raw provider bodies or follow redirects', async ()
   assert.throws(() => new Http('http://api.example'), /HTTPS/);
   assert.throws(() => new Http('https://user:password@api.example'), /HTTPS/);
 });
+test('Azure WIQL query posts to the project-scoped wiql endpoint', async () => {
+  const { providers, calls } = fixture();
+  await providers.queryTickets("SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = @Me");
+  assert.equal(calls[0].url.pathname, '/org/My%20Project/_apis/wit/wiql');
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].body.query, "SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = @Me");
+});
+test('Azure saved query run uses GET against the wiql/{id} endpoint', async () => {
+  const { providers, calls } = fixture();
+  await providers.runSavedQuery('54d97bf8-90cc-46f5-aaf4-eb00d5d144df');
+  assert.equal(calls[0].url.pathname, '/org/My%20Project/_apis/wit/wiql/54d97bf8-90cc-46f5-aaf4-eb00d5d144df');
+  assert.equal(calls[0].method, 'GET');
+});
+test('Azure ticket batch fetch joins ids and skips the call when empty', async () => {
+  const { providers, calls } = fixture();
+  await providers.ticketsByIds([1, 2, 3]);
+  assert.equal(calls[0].url.pathname, '/org/My%20Project/_apis/wit/workitems');
+  assert.equal(calls[0].url.searchParams.get('ids'), '1,2,3');
+  const empty = await providers.ticketsByIds([]);
+  assert.deepEqual(empty, { value: [] });
+  assert.equal(calls.length, 1);
+});
 test('read pagination is passed through', async () => {
   const { providers, calls } = fixture(); await providers.diffs({ provider: 'github', project: 'a/b', number: 1 }, 3);
   assert.equal(calls[0].url.searchParams.get('page'), '3'); assert.equal(calls[0].url.searchParams.get('per_page'), '100');
+});
+
+test('network failures expose only the error code, plus a TLS hint when a proxy re-signs HTTPS', async () => {
+  const failing = cause => new Http('https://api.example', {}, async () => { const error = new TypeError('fetch failed https://api.example/secret?token=abc'); error.cause = cause; throw error; });
+  await assert.rejects(failing({ code: 'SELF_SIGNED_CERT_IN_CHAIN' }).request('/user'), error => {
+    assert.match(error.message, /^Remote GET request failed \(SELF_SIGNED_CERT_IN_CHAIN\)\. Node rejected the TLS certificate/);
+    assert.doesNotMatch(error.message, /secret|token|api\.example/, 'the URL must never leak into the message');
+    assert.doesNotMatch(error.message, /write may have succeeded/, 'a GET cannot have written anything');
+    return true;
+  });
+  await assert.rejects(failing({ code: 'ECONNREFUSED' }).request('/x', { method: 'POST', body: {} }), /Remote POST request failed \(ECONNREFUSED\)\. A write may have succeeded; reconcile before retrying\.$/);
+  const timingOut = new Http('https://api.example', {}, async () => { throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }); });
+  await assert.rejects(timingOut.request('/x'), /failed \(TIMEOUT\)/);
 });
