@@ -14,7 +14,8 @@ Assistant:  checks out MR 306 in a separate worktree · runs tsc + eslint · lis
 
 ## Why it is different
 
-- **It checks the evidence, not only the diff.** Each MR/PR is checked out in its own git worktree, without touching your branch. The repository's own TypeScript compiler, ESLint and `dotnet build` run there, and every call site of a changed symbol outside the diff is listed.
+- **It checks the evidence, not only the diff.** Each MR/PR is checked out in its own git worktree, without touching your branch. The repository's own TypeScript compiler, ESLint and `dotnet build` run there, the unit tests related to the change run too, and every call site of a changed symbol outside the diff is listed.
+- **It's light on context.** Responses are compact and shaped for review, without the providers' raw payloads. Mechanical steps can run on a cheaper subagent, so the reviewer's context is kept for the code.
 - **It reviews like a senior.** Rubrics for correctness (edge cases traced through each function, guarantees lost in removed lines), complexity (realistic n, derived Big O), design (duplicated helpers, smells that cause bugs) and tests are applied to every change. React/TypeScript, .NET, security and build rubrics add the specifics.
 - **It can't skip work silently.** Every changed hunk needs a verdict. The compiler and call-site passes must have run on the exact commit under review, or the draft must say why they were skipped. A blocker must be `confirmed`.
 - **Nothing is posted without you.** Drafts are approved by you, in a form inside the assistant, in a local browser page, or in a terminal. The model cannot approve.

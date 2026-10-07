@@ -27,12 +27,14 @@ export class Runs {
 }
 
 const PASSES = { checks: 'checks', blastRadius: 'blast_radius' };
+const OPTIONAL = { tests: 'tests' };
 
 // Instructions alone did not get these passes run: the trace showed them in about one review in six.
 // A draft now carries either a run that analysed exactly this review, or an explicit, visible skip.
 export async function verifyDeterministic(runs, evidence, snapshot) {
   const verified = {};
-  for (const [field, kind] of Object.entries(PASSES)) {
+  const wanted = [...Object.entries(PASSES), ...Object.entries(OPTIONAL).filter(([field]) => evidence?.[field])];
+  for (const [field, kind] of wanted) {
     const claim = evidence?.[field];
     if (!claim) throw new Error(`deterministic.${field} is required: pass the runId returned by step=${kind}, or { "skipped": "<reason>" } to declare it was not run.`);
     if (claim.skipped) { verified[field] = { skipped: claim.skipped }; continue; }

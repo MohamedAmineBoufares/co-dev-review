@@ -183,3 +183,14 @@ test('the browser approval page applies edits, posts the selection, and refuses 
   assert.notEqual(reuse, 200, 'the page is single-use');
   assert.equal(state.posts.length, 1);
 });
+
+test('test-run evidence is optional, but checked like the others when given', async t => {
+  const { service, runs, state } = await fixture(t);
+  const request = { target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor' }], coverage: [{ hunks: '1.1', verdict: 'reviewed-clean' }] };
+  const run = (kind, extra = {}) => runs.record({ kind, mode: 'branch', head: state.head, base: 'base', changedFileCount: 1, summary: {}, ...extra });
+  const passes = { checks: { runId: (await run('checks')).id }, blastRadius: { runId: (await run('blast_radius')).id } };
+  assert.equal((await service.reviewDraft({ ...request, deterministic: passes })).deterministic.tests, undefined);
+  const withTests = await service.reviewDraft({ ...request, deterministic: { ...passes, tests: { runId: (await run('tests')).id } } });
+  assert.ok(withTests.deterministic.tests.runId);
+  await assert.rejects(service.reviewDraft({ ...request, deterministic: { ...passes, tests: { runId: (await run('tests', { head: 'old' })).id } } }), /not the review head/);
+});

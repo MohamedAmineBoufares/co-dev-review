@@ -9,6 +9,22 @@ Target: $ARGUMENTS — an MR/PR number, or nothing, in which case review the loc
 
 Run these steps in order and do not skip one silently. If a step is unavailable, say so in the review rather than omitting it.
 
+## Delegate the mechanical work
+
+Checking out, installing, compiling, linting, searching call sites and running tests need no judgement, but their raw output fills the context the review needs. If this host can start subagents on a cheaper, faster model (for example Claude Code's Agent tool with a small model, or the host's equivalent), run steps 3 to 5b in **one** such subagent instead of in this conversation.
+
+Give it a strict contract:
+
+- Call exactly `review_work` step=`checkout`, then `checks`, then `blast_radius`, then `tests`, with this target. Nothing else: no other commands, no file edits, no conclusions about the code.
+- Reply in at most 30 lines:
+  - the three `runId`s, the worktree path and the install status;
+  - every `checks` finding on a changed line as `path:line rule message` (at most 30), plus counts for the rest;
+  - for each changed symbol, its caller count and up to five callers whose usage looks different from the others;
+  - test results as passed/failed counts, plus each failing test's name and first error line;
+  - any failure, verbatim.
+
+Keep every judgement in this conversation, on the main model: which rubric applies, what is a bug, its severity and confidence, the refutation, and the wording of comments. The subagent summarises evidence; it never decides what is wrong. Ask it for the full output of a specific finding when you need more. If the host cannot start subagents, run the steps here.
+
 1. **Read.** `review_work` step=`read`. Note the `rubrics`, `repoSkills` and `hunks` ledger it returns.
 
 2. **Load the expertise.**
@@ -21,7 +37,9 @@ Run these steps in order and do not skip one silently. If a step is unavailable,
 
 4. **Deterministic pass.** Run step=`checks` with the same target. Triage every finding on a changed line. Do not spend attention rediscovering by reading what the compiler already reported, and do not bill pre-existing findings to this change. Keep the returned `runId`.
 
-5. **Blast radius.** Run step=`blast_radius` with the same target. For every changed signature, contract or behaviour, check the call sites it lists — they are outside the diff and nobody else is looking at them. Keep the returned `runId`.
+5. **Blast radius.** Run step=`blast_radius` with the same target. For every changed signature, contract or behaviour, check the call sites it lists — they are outside the diff and nobody else is looking at them. It shows one caller per file; pass `symbols: [name]` for every caller of a symbol whose contract changed. Keep the returned `runId`.
+
+5b. **Tests.** Run step=`tests` with the same target when the change alters behaviour. It runs only the tests related to the changed files. A failing test on this change is a confirmed finding; quote its name and message. Pass its `runId` as `deterministic.tests`. If no runner applies, say so.
 
 6. **Understand before judging.** Read the MR description and the ticket first (step 8 can run now). Write down in two or three sentences what the change is meant to do and how it does it. Question the approach itself once, at this level, before any line-level comment: is this the right layer, and is there a clearly simpler way?
 
@@ -46,6 +64,6 @@ Run these steps in order and do not skip one silently. If a step is unavailable,
 
 11. **Report.** Present blockers separately from optional findings. For each: the trigger that produces it, the consequence, the evidence, the confidence (confirmed / likely / question) and the suggested change. For complexity findings include n, its realistic size and the Big O before and after. List what you could not verify and which rubric sections found nothing. Wait for the user to decide what to keep.
 
-12. **Prepare.** Only after the user has chosen, call step=`prepare_comments` with the agreed items, a `coverage` entry giving every hunk id a verdict (`7.*` covers a whole file), and `deterministic: { checks: { runId }, blastRadius: { runId } }`. A pass that could not run is declared as `{ skipped: "<reason>" }`; the approver sees the reason. Runs on another commit or base are rejected. The server then asks the user to approve right away. Read `approval.status` in the result and report it: `published` (list what was posted), `approved` (publish only if the user asks), `pending` (the user is deciding in their browser or terminal; wait for them, then `view_draft`), or `declined`/`cancelled`/`nothing-selected` (nothing was posted).
+12. **Prepare.** Only after the user has chosen, call step=`prepare_comments` with the agreed items, a `coverage` entry giving every hunk id a verdict (`7.*` covers a whole file), and `deterministic: { checks: { runId }, blastRadius: { runId }, tests: { runId } }` (tests only when you ran them). A pass that could not run is declared as `{ skipped: "<reason>" }`; the approver sees the reason. Runs on another commit or base are rejected. The server then asks the user to approve right away. Read `approval.status` in the result and report it: `published` (list what was posted), `approved` (publish only if the user asks), `pending` (the user is deciding in their browser or terminal; wait for them, then `view_draft`), or `declined`/`cancelled`/`nothing-selected` (nothing was posted).
 
 Never approve or publish on the user's behalf, and never answer an approval form yourself: the approval is the user's click in the form, the browser page or the terminal.

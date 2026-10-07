@@ -2,6 +2,7 @@ import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { digest } from './store.js';
+import { htmlToText, clip } from './compact.js';
 
 // The human approves in the assistant's own UI (MCP elicitation) or in a local browser page.
 // Either way the answer comes from the person, not the model: elicitation responses are produced
@@ -10,8 +11,6 @@ import { digest } from './store.js';
 const PAGE_TTL_MS = 30 * 60 * 1000;
 const FORM_TIMEOUT_MS = 15 * 60 * 1000;
 const DESCRIPTION_LIMIT = 1800;
-const stripHtml = html => String(html ?? '').replace(/<br\s*\/?>|<\/p>|<\/li>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\n{3,}/g, '\n\n').trim();
-const clip = (text, limit) => (text.length > limit ? `${text.slice(0, limit - 1)}…` : text);
 
 export function itemTitle(item) {
   if (!item.severity) return `${item.id} · ${item.title} · ${item.estimatedHours} h`;
@@ -19,7 +18,7 @@ export function itemTitle(item) {
   return `${item.id} · ${item.severity.toUpperCase()}${item.confidence ? ` (${item.confidence})` : ''} · ${where}`;
 }
 export function itemText(item) {
-  const body = item.body ?? stripHtml(item.description);
+  const body = item.body ?? htmlToText(item.description);
   const code = item.context?.snippet ? `\n\n${item.context.snippet.split('\n').slice(Math.max(0, item.context.markerIndex - 2), item.context.markerIndex + 3).join('\n')}` : '';
   return clip(body + code, DESCRIPTION_LIMIT);
 }

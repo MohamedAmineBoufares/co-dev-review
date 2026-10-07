@@ -16,7 +16,7 @@ const ESLINT_CONFIG = ['eslint.config.js', 'eslint.config.mjs', 'eslint.config.c
 
 const within = (root, candidate) => candidate === root || candidate.startsWith(root + path.sep);
 // Monorepos keep their real configuration next to each application, not at the repository root.
-function nearestDir(root, from, names) {
+export function nearestDir(root, from, names) {
   let current = path.resolve(from);
   while (within(root, current)) {
     if (names.some(name => fs.existsSync(path.join(current, name)))) return current;
@@ -27,7 +27,7 @@ function nearestDir(root, from, names) {
   return null;
 }
 // pnpm hoists to the workspace root, npm workspaces may not; look upward either way.
-function resolveBin(root, from, ...parts) {
+export function resolveBin(root, from, ...parts) {
   let current = path.resolve(from);
   while (within(root, current)) {
     const file = path.join(current, 'node_modules', ...parts);
@@ -134,7 +134,7 @@ function addedLines(file) {
   return lines;
 }
 
-export async function runChecks(config, { mode = 'working', base = 'HEAD', only } = {}) {
+export async function runChecks(config, { mode = 'working', base = 'HEAD', only, detail = 'summary' } = {}) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_./~^@{}-]*$/.test(base)) throw new Error('Invalid base ref');
   if (!['working', 'staged', 'branch'].includes(mode)) throw new Error('Invalid diff mode');
   const root = path.resolve(required(config, 'REVIEW_REPO_ROOT'));
@@ -164,7 +164,9 @@ export async function runChecks(config, { mode = 'working', base = 'HEAD', only 
       try { all.push(...await runner.run(root, group)); }
       catch (error) { failures.push({ project: path.relative(root, group.dir).replaceAll('\\', '/') || '.', error: error.message }); }
     }));
-    const scoped = all.filter(item => files.includes(item.path));
+    // Compiler messages can span many lines (long type names); a reviewer needs the first few hundred characters.
+    const scoped = all.filter(item => files.includes(item.path)).map(item => ({ ...item, message: item.message.length > 300 ? `${item.message.slice(0, 299)}…` : item.message }));
+    const elsewhere = scoped.filter(item => !added.get(item.path)?.has(item.line));
     runners[name] = {
       status: failures.length === projects.length ? 'failed' : 'ran',
       durationMs: Date.now() - started,
@@ -172,7 +174,8 @@ export async function runChecks(config, { mode = 'working', base = 'HEAD', only 
       skippedProjects: groups.length > MAX_GROUPS ? groups.length - MAX_GROUPS : undefined,
       failures: failures.length ? failures : undefined,
       onChangedLines: scoped.filter(item => added.get(item.path)?.has(item.line)).slice(0, 200),
-      elsewhereInChangedFiles: scoped.filter(item => !added.get(item.path)?.has(item.line)).slice(0, 100),
+      // Pre-existing findings are context, not this change's responsibility: counts by rule unless asked for in full.
+      ...(detail === 'full' ? { elsewhereInChangedFiles: elsewhere.slice(0, 100) } : { elsewhereCount: elsewhere.length, elsewhereByRule: Object.fromEntries(Object.entries(elsewhere.reduce((n, item) => ({ ...n, [item.rule]: (n[item.rule] ?? 0) + 1 }), {})).sort((a, b) => b[1] - a[1]).slice(0, 10)) }),
       outsideChangedFilesCount: all.length - scoped.length,
     };
   }));

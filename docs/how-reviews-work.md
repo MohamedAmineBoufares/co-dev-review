@@ -21,6 +21,10 @@ The `review-mr` skill (or the server's own instructions, for clients without ski
 11. **Report** to you.
 12. **Prepare** the draft, and you approve it.
 
+### Cheap work goes to a cheap model
+
+Checkout, installs, compiler and linter runs, call-site searches and test runs need no judgement, but their output is large. Every tool returns compact JSON shaped for review: no avatars, links or markup, and repeated context only on the first page. When the assistant can start subagents on a smaller model, the server instructions and `review-mr` tell it to run those steps in one such subagent with a strict contract: exact calls only, no edits, and a report of at most 30 lines with the run ids and the findings on changed lines. The main model keeps every judgement: rubrics, findings, severity, confidence and wording. This saves tokens and keeps the reviewer's context for the code. Assistants without subagents run the same steps inline.
+
 ## Rubrics
 
 `step=read` classifies the changed paths and returns the rubrics to load, each with the focus areas it owns.
@@ -61,10 +65,16 @@ In a monorepo, changed files are grouped by the nearest `tsconfig.json` or ESLin
 
 `step=blast_radius` extracts the exported symbols the change touched and lists their call sites outside the diff, using `git grep`. Those are the lines nobody is reviewing, and where a changed signature or contract breaks. Text matching cannot resolve overloads, re-exports or dynamic dispatch, so treat the list as leads.
 
+## Tests
+
+`step=tests` runs the reviewed project's unit tests related to the changed files: Vitest's `related` command, or Jest's `--findRelatedTests`. It runs in the review worktree, one run per project that declares a test runner, up to four. Only counts and the first lines of each failure come back, never the log.
+
+A failing test turns "this looks wrong" into a confirmed finding. A project whose tests couldn't run proves nothing, and the result says so. The reviewed change's test code is executed, so run it only on changes you would run locally anyway.
+
 ## Rules the server enforces
 
 - **Every hunk gets a verdict.** `step=read` returns one ledger entry per changed hunk, with an id `<file index>.<hunk index>` that stays stable across pagination. `prepare_comments` requires `finding`, `reviewed-clean` or `not-applicable` for every hunk (`7.*` for a whole file, `7.2-7.5` for a range), and names any hunk that is missing.
-- **The deterministic passes must have run on this review.** Each `checks` and `blast_radius` call returns a `runId`, recorded with the commit and base it analysed. `prepare_comments` requires `deterministic: { checks, blastRadius }`, each `{ runId }` or `{ skipped: "<reason>" }`. A run on another commit, another base or an empty range is rejected. A skip and its reason are shown to you at approval.
+- **The deterministic passes must have run on this review.** (`tests` is optional, and checked the same way when given.) Each `checks` and `blast_radius` call returns a `runId`, recorded with the commit and base it analysed. `prepare_comments` requires `deterministic: { checks, blastRadius }`, each `{ runId }` or `{ skipped: "<reason>" }`. A run on another commit, another base or an empty range is rejected. A skip and its reason are shown to you at approval.
 - **Findings carry a confidence.** After trying to refute each finding (full file, caller, callee, whether the trigger can reach production), the reviewer marks it `confirmed`, `likely` or `question`. A `blocker` must be `confirmed`, and a `question` is written as a question.
 - **Inline comments land on real changed lines.** Anchors are checked against added or deleted lines at the reviewed commit; context lines go into a general comment.
 

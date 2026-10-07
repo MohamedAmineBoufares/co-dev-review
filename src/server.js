@@ -8,6 +8,8 @@ import { version, workflow } from './instructions.js';
 import { localDiff } from './local.js';
 import { runChecks, runnerNames } from './checks.js';
 import { blastRadius } from './blast-radius.js';
+import { runTests } from './tests.js';
+import { draftSummary, sliceLines } from './compact.js';
 import { readSkills } from './repo-skills.js';
 import { record, summarize } from './trace.js';
 import { Worktrees, gitRefs } from './worktree.js';
@@ -48,7 +50,7 @@ const passEvidence = z.union([
   z.object({ runId: id.describe('runId returned by the step for this same target') }).strict(),
   z.object({ skipped: z.string().trim().min(20).max(500).describe('Why the pass could not be run; shown to the approver') }).strict(),
 ]);
-const deterministic = z.object({ checks: passEvidence, blastRadius: passEvidence }).describe('Proof that step=checks and step=blast_radius ran on this review head against its base, or an explicit reason each was skipped. A run on another commit or base is rejected.');
+const deterministic = z.object({ checks: passEvidence, blastRadius: passEvidence, tests: passEvidence.optional().describe('runId of step=tests on this head, when tests were run') }).describe('Proof that step=checks and step=blast_radius ran on this review head against its base, or an explicit reason each was skipped. A run on another commit or base is rejected.');
 
 const server = new McpServer({ name: 'co-dev-review', version }, { instructions: workflow });
 function tool(name, description, inputSchema, callback, readOnly = true) {
@@ -56,7 +58,8 @@ function tool(name, description, inputSchema, callback, readOnly = true) {
     try {
       const result = await callback(args);
       record(summarize(name, args, result));
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      // Compact JSON: indentation alone is about a quarter of every response, paid in every client's context.
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       let message = error instanceof Error ? error.message : 'Operation failed';
       for (const [key, value] of Object.entries(config)) if (key.includes('TOKEN') && value) message = message.replaceAll(value, '[REDACTED]');
@@ -93,7 +96,8 @@ async function requestApproval(draft, mode = 'auto') {
   }
   return terminalApproval(draft);
 }
-const preview = async (draft, approval) => ({ draft, approval: approval ?? terminalApproval(draft) });
+// The model just wrote every body; the result confirms ids, anchors and approval instead of echoing them. view_draft shows everything.
+const preview = async (draft, approval) => ({ draft: draftSummary(draft), approval: approval ?? terminalApproval(draft) });
 async function draftStep(kind, step, draftId, approval) {
   const draft = await service.store.read(draftId);
   if (draft.kind !== kind) throw new Error('This draft belongs to a different workflow.');
@@ -107,23 +111,24 @@ const savedSteps = [
   z.object({ step: z.literal('view_draft'), draftId: id }),
   z.object({ step: z.literal('publish'), draftId: id }),
 ];
-tool('review_work', 'request.step is one of: read, read_file, rubric, checkout, checks, blast_radius, prepare_comments, request_approval, view_draft, publish. Review local changes before pushing or a GitLab MR/GitHub PR. Start with step=read; it returns the diff, a per-hunk ledger and the domain rubrics to load. step=rubric returns the full text of a rubric for clients that cannot load skill files. step=checkout puts a remote MR/PR head in a dedicated worktree. step=checks runs the repository\'s own compiler and linters over the change; step=blast_radius lists call sites outside the diff. Both return a runId that prepare_comments requires. The assistant examines code, explains blockers and suggestions, and can prepare French/English comments. Publishing requires the user to approve the saved draft locally. These steps support one review; they are not separate tools.', {
+tool('review_work', 'request.step is one of: read, read_file, rubric, checkout, checks, blast_radius, tests, prepare_comments, request_approval, view_draft, publish. Review local changes before pushing or a GitLab MR/GitHub PR. Start with step=read; it returns the diff, a per-hunk ledger and the domain rubrics to load. step=rubric returns the full text of a rubric for clients that cannot load skill files. step=checkout puts a remote MR/PR head in a dedicated worktree. step=checks runs the repository\'s own compiler and linters over the change; step=blast_radius lists call sites outside the diff; step=tests runs the unit tests related to the change. Each returns a runId; prepare_comments requires the first two. The assistant examines code, explains blockers and suggestions, and can prepare French/English comments. Publishing requires the user to approve the saved draft locally. These steps support one review; they are not separate tools.', {
   request: z.discriminatedUnion('step', [
     z.object({ step: z.literal('read'), target: target.optional().describe('Remote MR/PR; omit to review the configured local checkout'), page, mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD').describe('For local branch review use the intended comparison ref, e.g. origin/develop') }),
-    z.object({ step: z.literal('read_file'), target, path: z.string().min(1), ref: z.string().min(1).describe('Head SHA from the reviewed snapshot') }),
+    z.object({ step: z.literal('read_file'), target, path: z.string().min(1), ref: z.string().min(1).describe('Head SHA from the reviewed snapshot'), lines: z.string().regex(/^\s*\d*\s*-?\s*\d*\s*$/).optional().describe('Line range such as "120-220", "120-" or "-80"; read only what you need. Without it, files longer than 1500 lines are cut with a continuation hint') }),
     z.object({ step: z.literal('rubric'), names: z.array(z.string().min(1).max(64)).min(1).max(8).describe('Rubric or repository skill names from the read result, e.g. ["review-react-ts", "house-style"]') }),
     z.object({ step: z.literal('checkout'), target, install: z.boolean().default(true).describe('Install dependencies from the lockfile (lifecycle scripts skipped) when node_modules is missing or the lockfile changed') }),
-    z.object({ step: z.literal('checks'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD'), only: z.array(z.enum(runnerNames)).optional().describe('Restrict which runners execute; omit to run every one that is available') }),
-    z.object({ step: z.literal('blast_radius'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD') }),
+    z.object({ step: z.literal('checks'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD'), only: z.array(z.enum(runnerNames)).optional().describe('Restrict which runners execute; omit to run every one that is available'), detail: z.enum(['summary', 'full']).default('summary').describe('summary keeps results short; full returns every finding or caller') }),
+    z.object({ step: z.literal('blast_radius'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD'), detail: z.enum(['summary', 'full']).default('summary').describe('summary keeps results short; full returns every finding or caller'), symbols: z.array(z.string().min(1).max(64)).max(10).optional().describe('Expand every caller of these symbols only') }),
+    z.object({ step: z.literal('tests'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD') }),
     z.object({ step: z.literal('prepare_comments'), target, language, items: z.array(finding).min(1).max(100), coverage, rubricsApplied: z.array(z.string().trim().min(1).max(64)).max(20).describe('Names of the rubric skills and repository skills you actually read and applied for this review, e.g. ["review-react-ts", "house-style"]. An empty array is accepted and is shown to the approver as such.'), deterministic, approval: approvalChoice }),
     ...savedSteps,
   ]),
 }, async ({ request: r }) => {
   if (r.step === 'read') return r.target ? reviewContext(service.providers, r.target, r.page, worktrees) : localDiff(config, r);
-  if (r.step === 'read_file') return await worktrees.source(r.target, r.path, r.ref) ?? service.providers.source(r.target, r.path, r.ref);
+  if (r.step === 'read_file') return sliceLines(await worktrees.source(r.target, r.path, r.ref) ?? await service.providers.source(r.target, r.path, r.ref), r.lines);
   if (r.step === 'rubric') return readSkills(config, r.names);
   if (r.step === 'checkout') return worktrees.prepare(service.providers, r.target, { install: r.install });
-  if (r.step === 'checks' || r.step === 'blast_radius') return deterministicPass(r);
+  if (r.step === 'checks' || r.step === 'blast_radius' || r.step === 'tests') return deterministicPass(r);
   if (r.step === 'prepare_comments') { const draft = await service.reviewDraft(r); return preview(draft, await requestApproval(draft, r.approval)); }
   return draftStep('review', r.step, r.draftId, r.approval);
 }, false);
@@ -132,15 +137,17 @@ tool('review_work', 'request.step is one of: read, read_file, rubric, checkout, 
 async function deterministicPass(r) {
   const worktree = r.target ? await worktrees.at(r.target) : null;
   const scoped = worktree ? { ...config, REVIEW_REPO_ROOT: worktree.path } : config;
-  const options = worktree ? { mode: 'branch', base: worktree.base, only: r.only } : { mode: r.mode, base: r.base, only: r.only };
-  const result = r.step === 'checks' ? await runChecks(scoped, options) : await blastRadius(scoped, options);
+  const shared = { only: r.only, detail: r.detail, symbols: r.symbols };
+  const options = worktree ? { mode: 'branch', base: worktree.base, ...shared } : { mode: r.mode, base: r.base, ...shared };
+  const result = r.step === 'checks' ? await runChecks(scoped, options) : r.step === 'tests' ? await runTests(scoped, options) : await blastRadius(scoped, options);
   const refs = await gitRefs(scoped.REVIEW_REPO_ROOT, options.base);
   const summary = r.step === 'checks'
     ? Object.fromEntries(Object.entries(result.runners ?? {}).map(([name, x]) => [name, x.status === 'ran' ? `${x.onChangedLines?.length ?? 0} on changed lines` : x.status]))
+    : r.step === 'tests' ? Object.fromEntries(result.projects.map(p => [p.project, p.status === 'passing' || p.status === 'failing' ? `${p.passed}/${p.total} passed` : p.status]))
     : { symbols: result.symbolsInspected, callers: result.symbols?.reduce((n, s) => n + s.callerCount, 0) ?? 0 };
   const entry = await runs.record({ kind: r.step, target: r.target, root: scoped.REVIEW_REPO_ROOT, mode: options.mode, head: refs.head, base: refs.base, changedFileCount: result.changedFileCount, summary });
   return { runId: entry.id, analysedHead: refs.head, worktree: worktree?.path, ...result,
-    evidence: r.target ? `Pass this runId as deterministic.${r.step === 'checks' ? 'checks' : 'blastRadius'}.runId in prepare_comments.` : 'Local run: valid as prepare_comments evidence only if this checkout is at the review head and base resolves to the review base. For a remote review use step=checkout and pass the target.' };
+    evidence: r.target ? `Pass this runId as deterministic.${r.step === 'blast_radius' ? 'blastRadius' : r.step}.runId in prepare_comments.` : 'Local run: valid as prepare_comments evidence only if this checkout is at the review head and base resolves to the review base. For a remote review use step=checkout and pass the target.' };
 }
 
 const plannedTask = z.object({
@@ -157,7 +164,7 @@ tool('plan_ticket_tasks', 'request.step is one of: search, read, prepare, reques
       wiql: z.string().trim().min(1).max(4000).optional().describe('WIQL query text, e.g. "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.AssignedTo] = @Me AND [System.State] <> \'Closed\' ORDER BY [System.ChangedDate] DESC". Supports @project and @Me macros.'),
       queryId: z.string().uuid().optional().describe('Id of a saved Azure DevOps query to run instead of ad-hoc WIQL — the GUID from the query\'s URL, e.g. .../_queries/query/<queryId>/'),
     }),
-    z.object({ step: z.literal('read'), ticketId: z.number().int().positive(), continuationToken: z.string().optional() }),
+    z.object({ step: z.literal('read'), ticketId: z.number().int().positive(), continuationToken: z.string().optional(), full: z.boolean().default(false).describe('Every raw Azure field instead of the reviewer-relevant ones, with HTML converted to text') }),
     z.object({ step: z.literal('prepare'), ticketId: z.number().int().positive(), language, tasks: z.array(plannedTask).min(1).max(50), approval: approvalChoice }),
     ...savedSteps,
   ]),
@@ -166,7 +173,7 @@ tool('plan_ticket_tasks', 'request.step is one of: search, read, prepare, reques
     if (Boolean(r.wiql) === Boolean(r.queryId)) throw new Error('Provide exactly one of wiql or queryId');
     return ticketSearch(service.providers, r);
   }
-  if (r.step === 'read') return ticketContext(service.providers, r.ticketId, r.continuationToken);
+  if (r.step === 'read') return ticketContext(service.providers, r.ticketId, r.continuationToken, { full: r.full });
   if (r.step === 'prepare') {
     const items = r.tasks.map(task => ({
       title: task.title, estimatedHours: task.estimatedHours, assignedTo: task.assignedTo,
@@ -178,15 +185,18 @@ tool('plan_ticket_tasks', 'request.step is one of: search, read, prepare, reques
   return draftStep('tasks', r.step, r.draftId, r.approval);
 }, false);
 
-tool('review_sonar', 'Inspect a PR/MR and its Sonar quality gate, coverage, duplication, issues and hotspots together. The assistant explains failures and, when asked, fixes code using its local editing/testing tools. Supply ruleKey for remediation details or filePath for source context. This tool reads evidence; a new Sonar analysis is needed to confirm a fix.', {
+tool('review_sonar', 'Inspect a PR/MR and its Sonar quality gate, coverage, duplication, issues and hotspots together. The assistant explains failures and, when asked, fixes code using its local editing/testing tools. Supply ruleKey for remediation details or filePath (and lines) for source context. Use review_work read for the diff. This tool reads evidence; a new Sonar analysis is needed to confirm a fix.', {
   target, project: z.string().optional().describe('Sonar project key; defaults to configuration'),
   page, ruleKey: z.string().optional(),
   filePath: z.string().min(1).optional().describe('Optional repository-relative file to inspect at the PR head'),
-}, async ({ target, project, page, ruleKey, filePath }) => {
-  const context = await reviewContext(service.providers, target, page);
-  const report = await sonarReport(service.providers, { project, pullRequest: String(target.number), page }, ruleKey);
-  const source = filePath ? await service.providers.source(target, filePath, context.review.head) : undefined;
-  return { ...context, sonar: report, source, note: 'Sonar data is scoped to this PR/MR number. Its analysis commit has not been verified against the current head. Inspect rules and code, apply authorized fixes in the matching local checkout, run relevant tests, and verify a new analysis before claiming Sonar is resolved.' };
+  lines: z.string().regex(/^\s*\d*\s*-?\s*\d*\s*$/).optional().describe('Line range of filePath, e.g. "40-90"'),
+  full: z.boolean().default(false).describe('Raw Sonar responses instead of the compact view'),
+}, async ({ target, project, page, ruleKey, filePath, lines, full }) => {
+  // Review metadata only: the diff is review_work's job, and sending it again doubled every Sonar call.
+  const { raw, ...review } = await service.providers.review(target);
+  const report = await sonarReport(service.providers, { project, pullRequest: String(target.number), page }, ruleKey, { full });
+  const source = filePath ? sliceLines(await worktrees.source(target, filePath, review.head) ?? await service.providers.source(target, filePath, review.head), lines) : undefined;
+  return { review: { title: review.title, url: review.url, head: review.head, sourceBranch: review.sourceBranch, targetBranch: review.targetBranch, state: review.state }, sonar: report, source, note: 'Sonar data is scoped to this PR/MR number. Its analysis commit has not been verified against the current head. Inspect rules and code, apply authorized fixes in the matching local checkout, run relevant tests, and verify a new analysis before claiming Sonar is resolved.' };
 });
 server.registerPrompt('review_workflow', { description: 'Evidence-based bilingual review with ticket verification, Sonar analysis, and explicit human approval', argsSchema: { language: language.optional() } }, ({ language = 'en' }) => ({ messages: [{ role: 'user', content: { type: 'text', text: `${workflow}\nPublication language: ${language}` } }] }));
 

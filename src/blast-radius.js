@@ -31,7 +31,9 @@ function declared(source) {
   return found;
 }
 
-export async function blastRadius(config, { mode = 'working', base = 'HEAD', maxSymbols = 30, maxCallersPerSymbol = 15 } = {}) {
+export async function blastRadius(config, { mode = 'working', base = 'HEAD', maxSymbols = 30, detail = 'summary', symbols: only } = {}) {
+  // Summary: a few callers per symbol, one per file, which is where usages differ. Full or named symbols: up to 50 each.
+  const maxCallersPerSymbol = detail === 'full' || only?.length ? 50 : 5;
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_./~^@{}-]*$/.test(base)) throw new Error('Invalid base ref');
   if (!['working', 'staged', 'branch'].includes(mode)) throw new Error('Invalid diff mode');
   const cwd = required(config, 'REVIEW_REPO_ROOT');
@@ -64,7 +66,8 @@ export async function blastRadius(config, { mode = 'working', base = 'HEAD', max
 
   const unique = [...new Map(candidates.map(item => [`${item.definedIn}:${item.name}`, item])).values()];
   const symbols = [];
-  for (const candidate of unique.slice(0, maxSymbols)) {
+  const inspected = only?.length ? unique.filter(item => only.includes(item.name)) : unique.slice(0, maxSymbols);
+  for (const candidate of inspected) {
     const output = await git(['grep', '-n', '--word-regexp', '--fixed-strings', '-e', candidate.name, '--', ...SEARCHED]);
     const callers = [];
     for (const line of output.split('\n')) {
@@ -75,11 +78,12 @@ export async function blastRadius(config, { mode = 'working', base = 'HEAD', max
       if (changed.has(file)) continue; // already visible in the diff
       callers.push({ path: file, line: Number(match[2]), text: match[3].trim().slice(0, 200) });
     }
-    symbols.push({ ...candidate, callerCount: callers.length, callers: callers.slice(0, maxCallersPerSymbol), truncated: callers.length > maxCallersPerSymbol });
+    const shown = detail === 'full' || only?.length ? callers : [...new Map(callers.map(caller => [caller.path, caller])).values()];
+    symbols.push({ ...candidate, callerCount: callers.length, callerFiles: new Set(callers.map(caller => caller.path)).size, callers: shown.slice(0, maxCallersPerSymbol), truncated: shown.length > maxCallersPerSymbol || shown.length < callers.length });
   }
 
   return {
     mode, base, changedFileCount: changed.size, symbols, symbolsFound: unique.length, symbolsInspected: symbols.length,
-    note: 'Callers listed here are outside the diff and were not reviewed. For each changed signature, contract or behaviour, check whether these call sites still hold. A symbol with zero callers may be new, dead, or reached dynamically. Text matching cannot resolve overloads, re-exports or dynamic dispatch.',
+    note: 'Callers listed here are outside the diff and were not reviewed. The summary shows one caller per file; pass symbols: [name] for every caller of a symbol. For each changed signature, contract or behaviour, check whether these call sites still hold. A symbol with zero callers may be new, dead, or reached dynamically. Text matching cannot resolve overloads, re-exports or dynamic dispatch.',
   };
 }

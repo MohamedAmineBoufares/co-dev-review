@@ -10,12 +10,13 @@ Reviews local changes before pushing, or a remote GitLab MR or GitHub PR, and pu
 
 | Step | Parameters | Returns |
 | --- | --- | --- |
-| `read` | `target?`, `page`, `mode` (`working`/`staged`/`branch`), `base` | Diff page, hunk ledger, rubrics, repository skills, review worktree status, `nextPage`. Without a `target`, it reads the local checkout |
-| `read_file` | `target`, `path`, `ref` | A file at the reviewed head, from the review worktree when it is at that commit, otherwise from the API |
+| `read` | `target?`, `page`, `mode` (`working`/`staged`/`branch`), `base` | Diff page (path, status, patch), existing discussions without system notes, hunk ledger and `nextPage`. Page 1 also returns the rubrics, repository skills and worktree status. Without a `target`, it reads the local checkout, paged by 100 files or about 200 KB |
+| `read_file` | `target`, `path`, `ref`, `lines?` | A file at the reviewed head, from the review worktree when it is at that commit, otherwise from the API. `lines` (`"120-220"`, `"120-"`, `"-80"`) returns a range; without it, files over 1,500 lines are cut with a continuation hint |
 | `rubric` | `names` (≤ 8) | Full text of packaged or repository skills, for clients that cannot load skill files |
 | `checkout` | `target`, `install` (default `true`) | Prepares the review worktree at the head and installs dependencies |
-| `checks` | `target?` or `mode`/`base`, `only?` | Compiler and linter findings split by changed lines, plus a `runId` |
-| `blast_radius` | `target?` or `mode`/`base` | Changed exported symbols and their callers outside the diff, plus a `runId` |
+| `checks` | `target?` or `mode`/`base`, `only?`, `detail?` | Compiler and linter findings on changed lines, pre-existing ones counted by rule (`detail: "full"` lists them), plus a `runId` |
+| `blast_radius` | `target?` or `mode`/`base`, `detail?`, `symbols?` | Changed exported symbols with their caller count and one caller per file; `symbols: [name]` or `detail: "full"` lists up to 50 callers each. Plus a `runId` |
+| `tests` | `target?` or `mode`/`base` | Runs only the unit tests related to the changed files (Vitest `related`, Jest `--findRelatedTests`), per project; returns counts and the first lines of each failure, plus a `runId` |
 | `prepare_comments` | `target`, `language` (`fr`/`en`), `items`, `coverage`, `rubricsApplied`, `deterministic`, `approval?` | The saved draft and the approval outcome |
 | `request_approval` | `draftId`, `approval?` | Asks for approval of an existing draft again |
 | `view_draft` | `draftId` | The draft, its stored approval and its publication journal |
@@ -32,8 +33,10 @@ The parameters of `prepare_comments`:
   - `hunks`: `7.2`, `7.*`, `7.2-7.5` or a comma-separated mix
   - `verdict`: `finding`, `reviewed-clean` or `not-applicable`
 - **`rubricsApplied`**: the rubric and repository skill names actually applied. They are shown to the approver.
-- **`deterministic`**: `{ checks, blastRadius }`, each `{ runId }` from a run on this head and base, or `{ skipped: "<reason, 20+ characters>" }`.
+- **`deterministic`**: `{ checks, blastRadius, tests? }`, each `{ runId }` from a run on this head and base, or `{ skipped: "<reason, 20+ characters>" }`. `tests` is optional and verified the same way when given.
 - **`approval`**: `auto` (default), `in-chat`, `browser` or `terminal`.
+
+The result confirms the draft by id, severity, confidence and anchor without repeating the bodies you sent; `view_draft` shows everything.
 
 `approval.status` in the result is one of:
 
@@ -52,7 +55,7 @@ Turns an Azure DevOps Bug or PBI into estimated child tasks.
 | Step | Parameters | Returns |
 | --- | --- | --- |
 | `search` | `wiql` or `queryId` (exactly one) | Up to 200 tickets: id, title, type, state, assignee, tags, area, iteration |
-| `read` | `ticketId`, `continuationToken?` | Fields, relations (children), discussion |
+| `read` | `ticketId`, `continuationToken?`, `full?` | Reviewer-relevant fields with HTML converted to text (description, acceptance criteria, repro steps), parent, children, related items, linked pull requests and attachments, and the discussion. `full: true` returns the raw work item |
 | `prepare` | `ticketId`, `language`, `tasks`, `approval?` | The saved draft, the total hours and the approval outcome |
 | `request_approval`, `view_draft`, `publish` | `draftId` | As for reviews |
 
@@ -62,9 +65,13 @@ Tasks inherit the parent's area and iteration, link to it as children, and get O
 
 ## `review_sonar`
 
-Takes `target`, an optional Sonar `project`, `page`, `ruleKey` and `filePath`. It returns the review context, together with the quality gate, metrics, issues and hotspots for that PR number. `ruleKey` adds the remediation guidance for a rule, and `filePath` adds the file's source at the PR head.
+Takes `target`, an optional Sonar `project`, `page`, `ruleKey`, `filePath`, `lines` and `full`. It returns the review's title, head and branches, together with the quality gate, metrics, issues and hotspots for that PR number. Issues and hotspots carry their key, rule, severity, path, line and message; `full: true` returns the raw Sonar responses. `ruleKey` adds the rule's remediation guidance as text, and `filePath` (optionally with `lines`) adds the file's source at the PR head. For the diff itself, use `review_work` `read`.
 
 The tool only reads. Fixes are made with the assistant's own editing tools, and a fresh analysis is needed to confirm them.
+
+## Output size
+
+Every response is compact JSON, and each tool returns what a reviewer or planner uses rather than the providers' raw payloads: no avatars, links, hashes or styling markup. Repeated context (rubrics, repository skills, checkout state) comes once, on page 1. Where more detail can matter, an explicit option returns it: `detail: "full"`, `symbols`, `lines`, `full: true` and `view_draft`.
 
 ## Prompt
 

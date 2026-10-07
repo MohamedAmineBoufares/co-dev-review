@@ -33,7 +33,8 @@ function renderTrace(events) {
       case 'checkout': detail = `head ${e.head ?? '?'}${e.reused ? ' · reused worktree' : ' · new worktree'} · install ${e.install ?? '?'}`; break;
       case 'checks': detail = `${style.dim(e.scope ?? '')}  ` + (e.changedFiles === 0 ? style.yellow('no changed files in range') : Object.entries(e.runners ?? {}).map(([n, s]) => `${n} ${s}`).join(' · ') || style.dim('no runners')); break;
       case 'blast_radius': detail = `${style.dim(e.scope ?? '')}  ${e.symbols} symbol(s), ${e.callers} caller(s) outside the diff`; break;
-      case 'read_file': detail = safe(e.path); break;
+      case 'tests': detail = `${style.dim(e.scope ?? '')}  ` + (Object.entries(e.projects ?? {}).map(([p, s]) => `${safe(p)} ${s}`).join(' · ') || style.yellow('no tests ran')); break;
+      case 'read_file': detail = safe(e.path) + (e.lines ? style.dim(` lines ${safe(e.lines)}`) : ''); break;
       case 'prepare_comments': detail = `draft ${e.draft?.slice(0, 8)} · ${e.items} item(s) ${Object.entries(e.severities ?? {}).map(([s, n]) => `${n} ${s}`).join(', ')} · ${e.coverage}\n${' '.repeat(29)}declared applied: ${e.declared?.length ? style.green(e.declared.map(safe).join(', ')) : style.yellow('none')}`
         + (e.approval ? `
 ${' '.repeat(29)}approval: ${e.approval}` : '')

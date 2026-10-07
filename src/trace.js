@@ -25,11 +25,11 @@ export function summarize(tool, args, result, error) {
     case 'read':
       if (tool === 'plan_ticket_tasks') return { ...entry, ticket: result?.ticket?.id, type: result?.ticket?.fields?.['System.WorkItemType'] };
       return { ...entry,
-        files: result?.changes?.data?.length ?? (result?.hunks ? new Set(result.hunks.map(h => h.path)).size : undefined),
+        files: result?.changes?.data?.length ?? (Array.isArray(result?.changes) ? result.fileCount : undefined) ?? (result?.hunks ? new Set(result.hunks.map(h => h.path)).size : undefined),
         hunks: result?.hunks?.length, page: result?.page, incomplete: result?.incomplete,
         rubricsOffered: [...new Set(result?.rubrics?.rubrics?.map(r => r.skill ?? `${r.id} (no packaged skill)`) ?? [])],
         repoSkillsOffered: result?.repoSkills?.skills?.map(s => s.name),
-        gate: result?.sonar?.gate?.data?.projectStatus?.status,
+        gate: result?.sonar?.gate?.data?.status ?? result?.sonar?.gate?.data?.projectStatus?.status,
         checkout: result?.localCheckout ? (result.localCheckout.worktree?.matchesReview ? 'review worktree at head' : result.localCheckout.matchesReview ? 'matches review head' : `MISMATCH: local is on ${result.localCheckout.branch}`) : undefined };
     case 'checkout':
       return { ...entry, head: result?.head?.slice(0, 12), reused: result?.reused, install: result?.install?.status };
@@ -39,12 +39,14 @@ export function summarize(tool, args, result, error) {
       return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, changedFiles: result?.changedFileCount, runners: Object.fromEntries(Object.entries(result?.runners ?? {}).map(([name, r]) => [name, r.status === 'ran' ? `${r.onChangedLines?.length ?? 0} on changed lines` : r.status])) };
     case 'blast_radius':
       return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, symbols: result?.symbolsInspected, callers: result?.symbols?.reduce((n, s) => n + s.callerCount, 0) };
+    case 'tests':
+      return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, projects: Object.fromEntries((result?.projects ?? []).map(p => [p.project, p.total !== undefined ? `${p.passed}/${p.total} passed` : p.status])) };
     case 'read_file':
-      return { ...entry, path: args.request.path };
+      return { ...entry, path: args.request.path, lines: args.request.lines };
     case 'prepare_comments':
       return { ...entry, draft: result?.draft?.id, items: result?.draft?.items?.length,
         severities: Object.fromEntries(['blocker', 'major', 'minor', 'suggestion'].map(s => [s, result?.draft?.items?.filter(i => i.severity === s).length ?? 0]).filter(([, n]) => n)),
-        coverage: result?.draft?.coverage ? `${result.draft.coverage.claims.length} claim(s) over ${result.draft.coverage.hunkCount} hunks` : undefined,
+        coverage: result?.draft?.coverage ? `${result.draft.coverage.claimCount ?? result.draft.coverage.claims?.length} claim(s) over ${result.draft.coverage.hunkCount} hunks` : undefined,
         declared: result?.draft?.rubricsApplied,
         approval: result?.approval ? `${result.approval.via} ${result.approval.status}` : undefined,
         deterministic: result?.draft?.deterministic && Object.fromEntries(Object.entries(result.draft.deterministic).map(([pass, x]) => [pass, x.runId ? 'run' : 'skipped'])) };

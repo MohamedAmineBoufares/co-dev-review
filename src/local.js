@@ -5,7 +5,31 @@ import { ledger, splitUnifiedDiff } from './hunks.js';
 import { suggestRubrics } from './rubrics.js';
 import { repoSkills } from './repo-skills.js';
 const exec = promisify(execFile);
-export async function localDiff(config, { mode = 'working', base = 'HEAD' } = {}) {
+const PAGE_FILES = 100;
+const PAGE_BYTES = 200_000;
+// git's per-file header (index, ---/+++, modes) carries nothing a reviewer reads beyond the status.
+function compactLocalFile(file) {
+  const start = file.patch.search(/^@@ /m);
+  const header = start < 0 ? file.patch : file.patch.slice(0, start);
+  const status = /^new file mode/m.test(header) ? 'added' : /^deleted file mode/m.test(header) ? 'deleted' : /^rename from/m.test(header) ? 'renamed' : 'modified';
+  const oldPath = /^rename from (.+)$/m.exec(header)?.[1]?.trim();
+  if (start < 0) return { path: file.path, status, unavailable: /^Binary files/m.test(header) ? 'binary' : 'no textual change' };
+  return { path: file.path, ...(oldPath ? { oldPath } : {}), status, patch: file.patch.slice(start) };
+}
+// Pages hold up to 100 files and about 200 KB of patch, so one huge diff never lands in a single response.
+function pages(files) {
+  const result = [];
+  let current = [], size = 0;
+  for (const file of files) {
+    if (current.length && (current.length >= PAGE_FILES || size + file.patch.length > PAGE_BYTES)) { result.push(current); current = []; size = 0; }
+    current.push(file);
+    size += file.patch.length;
+  }
+  if (current.length) result.push(current);
+  return result;
+}
+
+export async function localDiff(config, { mode = 'working', base = 'HEAD', page = 1 } = {}) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_./~^@{}-]*$/.test(base)) throw new Error('Invalid base ref');
   if (!['working', 'staged', 'branch'].includes(mode)) throw new Error('Invalid diff mode');
   const cwd = required(config, 'REVIEW_REPO_ROOT');
@@ -22,9 +46,16 @@ export async function localDiff(config, { mode = 'working', base = 'HEAD' } = {}
   args.push('--');
   const [diff, status] = await Promise.all([git(args), git(['status', '--short'])]);
   const files = splitUnifiedDiff(diff);
-  return { head, base: resolved, mode, diff, status,
-    hunks: ledger(files), rubrics: suggestRubrics(files.map(file => file.path)), repoSkills: repoSkills(config),
-    note: 'Read-only snapshot. Untracked file contents are not in git diff; inspect them separately. No commit or push is performed. Load the skills named in rubrics (or fetch their text with step=rubric if this client cannot load skill files) and read the repoSkills files that match this change before judging the code, and account for every hunk id. Run step=checks and step=blast_radius before concluding: they surface what reading a diff cannot.' };
+  const split = pages(files);
+  const current = split[page - 1] ?? [];
+  const startIndex = split.slice(0, page - 1).reduce((n, group) => n + group.length, 0);
+  const result = { head, base: resolved, mode, page, fileCount: files.length,
+    changes: current.map(compactLocalFile), hunks: ledger(current, startIndex),
+    nextPage: page < split.length ? page + 1 : null };
+  if (page > 1) return { ...result, note: 'Rubrics, repoSkills and status were returned with page 1.' };
+  return { ...result, status,
+    rubrics: suggestRubrics(files.map(file => file.path)), repoSkills: repoSkills(config),
+    note: 'Read-only snapshot. Continue nextPage until null. Untracked file contents are not in git diff; inspect them separately. Load the skills named in rubrics (or fetch their text with step=rubric) and read the repoSkills that match this change before judging the code, and account for every hunk id. Run step=checks, step=blast_radius and step=tests before concluding: they surface what reading a diff cannot.' };
 }
 
 // Where the local checkout actually is, so a remote review can say whether checks and blast
