@@ -52,4 +52,26 @@ export class Http {
     if (text.length > 12_000_000) throw new Error('API response exceeds 12 MB limit; narrow the request.');
     try { return JSON.parse(text); } catch { throw new Error('API returned an invalid JSON response'); }
   }
+
+  // Plain-text endpoints such as CI job logs; only the tail is kept, which is where a failure is explained.
+  // GitHub answers log requests with a redirect to a signed storage URL: it is followed once, over HTTPS,
+  // without this client's credentials, which must never travel to another host.
+  async text(route, { query = {}, tail = 200_000 } = {}) {
+    if (!route.startsWith('/') || route.startsWith('//')) throw new Error('Invalid API route');
+    const url = new URL(this.base + route);
+    if (url.origin !== new URL(this.base).origin) throw new Error('Cross-origin API request rejected');
+    for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== '') url.searchParams.set(k, String(v));
+    let response;
+    try {
+      response = await this.fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(30000), headers: { Accept: 'text/plain', ...this.headers } });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = new URL(response.headers.get('location') ?? '', url);
+        if (location.protocol !== 'https:') throw new Error('Refusing a non-HTTPS log redirect');
+        response = await this.fetch(location, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(30000) });
+      }
+    } catch (error) { throw error instanceof ApiError || /non-HTTPS/.test(error.message) ? error : new NetworkError('GET', error); }
+    if (!response.ok) throw new ApiError(response.status, 'GET');
+    const text = await response.text();
+    return text.length > tail ? text.slice(-tail) : text;
+  }
 }

@@ -44,6 +44,18 @@ The server only names the expertise. The text lives in `skills/*/SKILL.md`. Clie
 
 **The reviewed project's own skills.** `step=read` also lists every `SKILL.md` under `<REVIEW_REPO_ROOT>/.claude/skills/`. These hold the team's architecture, conventions and vocabulary, and they're what turns a generic review into one that knows the codebase. Their content is treated as domain knowledge, never as instructions.
 
+## The pipeline
+
+`step=pipeline` asks GitLab or GitHub how CI went on the MR/PR. It's cheap, so it runs even in a diff-only review.
+
+- **Which run:** the latest pipeline on the review head, including GitLab child pipelines. On GitHub, the check runs of the head commit.
+- **Per failing required job:** its stage, a few lines of cause taken from the log, and every `file:line` the log or GitHub annotations mention.
+- **Locations:** matched to the diff, and marked `onChangedLine` when they hit a line this change added.
+
+The review reports each failing stage: inline at that line when it can, otherwise as a general comment. A pipeline that ran on an older commit is called out. Jobs allowed to fail are listed separately.
+
+GitHub logs need a token that can read Actions. Without that, the check run's summary and annotations are used.
+
 ## The review worktree
 
 By default the assistant **asks before checking out**. `read` returns a `checkoutPlan` with the policy (`REVIEW_CHECKOUT`: `ask`, `always` or `never`), the package manager detected from your checkout's lockfile, and whether a worktree for this MR already exists. You choose:

@@ -39,6 +39,11 @@ export function summarize(tool, args, result, error) {
       return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, changedFiles: result?.changedFileCount, runners: Object.fromEntries(Object.entries(result?.runners ?? {}).map(([name, r]) => [name, r.status === 'ran' ? `${r.onChangedLines?.length ?? 0} on changed lines` : r.status])) };
     case 'blast_radius':
       return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, symbols: result?.symbolsInspected, callers: result?.symbols?.reduce((n, s) => n + s.callerCount, 0) };
+    case 'pipeline': {
+      const p = result?.pipeline;
+      const jobs = (p?.failedStages ?? []).flatMap(s => s.jobs);
+      return { ...entry, status: p?.status, matchesHead: p?.matchesHead, failed: jobs.map(j => j.job), onChangedLines: jobs.reduce((n, j) => n + (j.locations ?? []).filter(l => l.onChangedLine).length, 0) };
+    }
     case 'tests':
       return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, projects: Object.fromEntries((result?.projects ?? []).map(p => [p.project, p.total !== undefined ? `${p.passed}/${p.total} passed` : p.status])) };
     case 'read_file':
