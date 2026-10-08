@@ -35,7 +35,7 @@ export class Store {
         const posted = Object.values(journal).filter(x => x.state === 'posted').length;
         drafts.push({ id, kind: draft.kind, language: draft.language, createdAt: draft.createdAt, items: draft.items.length, posted,
           approved: Boolean(approval) && approval.hash === digest(draft) && Date.parse(approval.expiresAt) > Date.now(),
-          label: draft.snapshot?.title || draft.parent?.fields?.['System.Title'] || draft.destination });
+          label: draft.snapshot?.title || draft.parent?.title || draft.parent?.fields?.['System.Title'] || draft.destination });
       } catch { /* a half-written or hand-edited draft must not hide the others */ }
     }
     return drafts.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));

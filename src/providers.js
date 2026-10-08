@@ -10,6 +10,8 @@ export class Providers {
     if (provider === 'gitlab') return new Http((c.GITLAB_URL || 'https://gitlab.com').replace(/\/$/, '') + '/api/v4', { 'PRIVATE-TOKEN': required(c, 'GITLAB_TOKEN') }, this.fetch);
     if (provider === 'github') return new Http(c.GITHUB_API_URL || 'https://api.github.com', { Authorization: `Bearer ${required(c, 'GITHUB_TOKEN')}`, 'X-GitHub-Api-Version': '2022-11-28' }, this.fetch);
     if (provider === 'azure') return new Http(required(c, 'AZURE_DEVOPS_ORG_URL'), { Authorization: `Basic ${Buffer.from(':' + required(c, 'AZURE_DEVOPS_TOKEN')).toString('base64')}` }, this.fetch);
+    // Jira Cloud authenticates with email + API token (Basic); Server/Data Center with a personal access token (Bearer).
+    if (provider === 'jira') return new Http(required(c, 'JIRA_URL').replace(/\/$/, ''), { Authorization: c.JIRA_EMAIL ? `Basic ${Buffer.from(`${c.JIRA_EMAIL}:${required(c, 'JIRA_TOKEN')}`).toString('base64')}` : `Bearer ${required(c, 'JIRA_TOKEN')}` }, this.fetch);
     if (provider === 'sonar') return new Http(c.SONAR_URL || 'https://sonarcloud.io', { Authorization: `Bearer ${required(c, 'SONAR_TOKEN')}` }, this.fetch);
     throw new Error('Unsupported provider');
   }

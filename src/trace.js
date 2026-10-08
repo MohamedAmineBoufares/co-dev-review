@@ -23,7 +23,7 @@ export function summarize(tool, args, result, error) {
   if (error) return { ...entry, error: String(error).slice(0, 300) };
   switch (step) {
     case 'read':
-      if (tool === 'plan_ticket_tasks') return { ...entry, ticket: result?.ticket?.id, type: result?.ticket?.fields?.['System.WorkItemType'] };
+      if (tool === 'plan_ticket_tasks') return { ...entry, ticket: result?.ticket?.id ?? result?.ticket?.key, type: result?.ticket?.type ?? result?.ticket?.fields?.['System.WorkItemType'], tracker: result?.tracker };
       return { ...entry,
         files: result?.changes?.data?.length ?? (Array.isArray(result?.changes) ? result.fileCount : undefined) ?? (result?.hunks ? new Set(result.hunks.map(h => h.path)).size : undefined),
         hunks: result?.hunks?.length, page: result?.page, incomplete: result?.incomplete,

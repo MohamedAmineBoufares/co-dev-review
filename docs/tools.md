@@ -53,11 +53,11 @@ The result confirms the draft by id, severity, confidence and anchor without rep
 
 ## `plan_ticket_tasks`
 
-Turns an Azure DevOps Bug or PBI into estimated child tasks.
+Turns a ticket into estimated child tasks, in Azure DevOps (child Tasks), Jira (sub-tasks) or GitHub Issues (sub-issues). The tracker is inferred from the id (`42`, `PROJ-123`, `owner/repo#45`), else `TICKET_TRACKER`; pass `tracker` to force one.
 
 | Step | Parameters | Returns |
 | --- | --- | --- |
-| `search` | `wiql` or `queryId` (exactly one) | Up to 200 tickets: id, title, type, state, assignee, tags, area, iteration |
+| `search` | `query` (WIQL, JQL or GitHub issue search) or `queryId` (Azure saved query, Jira filter), `tracker?` | Up to 200 tickets: id, title, type, state, assignee, tags, area, iteration |
 | `read` | `ticketId`, `continuationToken?`, `full?` | Reviewer-relevant fields with HTML converted to text (description, acceptance criteria, repro steps), parent, children, related items, linked pull requests and attachments, and the discussion. `full: true` returns the raw work item |
 | `prepare` | `ticketId`, `language`, `tasks`, `approval?` | The saved draft, the total hours and the approval outcome |
 | `request_approval`, `approve`, `revise`, `view_draft`, `publish` | `draftId`… | As for reviews; task ids are `T1`, `T2`… |

@@ -2,6 +2,7 @@ import { Store, digest } from './store.js';
 import { Providers } from './providers.js';
 import { ledger, coverageGaps, anchorContext } from './hunks.js';
 import { Runs, verifyDeterministic } from './runs.js';
+import { makeTrackers, resolveTicket, snapshotChanged } from './trackers.js';
 
 // Added/deleted line anchors only; ambiguous context lines are deliberately rejected.
 export function anchors(patch = '') {
@@ -19,7 +20,10 @@ export function anchors(patch = '') {
   return { LEFT: left, RIGHT: right };
 }
 export class Service {
-  constructor(config, { providers = new Providers(config), store = new Store(), runs = new Runs() } = {}) { this.providers = providers; this.store = store; this.runs = runs; }
+  constructor(config, { providers = new Providers(config), store = new Store(), runs = new Runs(), trackers = makeTrackers(providers) } = {}) { this.providers = providers; this.store = store; this.runs = runs; this.trackers = trackers; }
+  // Tasks belong to whichever tracker holds the parent ticket; drafts saved before trackers existed are Azure.
+  tracker(draft) { return this.trackers[draft.tracker ?? 'azure']; }
+  destinationOf(draft) { return draft.kind === 'review' ? this.providers.destination(draft.target) : this.tracker(draft).destination(draft.parent); }
   async reviewDraft({ target, language, items, coverage = [], rubricsApplied = [], deterministic }) {
     target = { ...target, project: target.project || this.providers.config.GITLAB_PROJECT_ID };
     const snapshot = await this.providers.review(target);
@@ -55,16 +59,16 @@ export class Service {
       // Captured now so approval can show the code a comment lands on, without a second fetch.
       items: items.map((x, i) => ({ ...x, id: `R${i + 1}`, context: x.path ? anchorContext(files, x.path, x.line, x.side) : undefined })) });
   }
-  async taskDraft({ parentId, language, items }) {
-    const parent = await this.providers.ticket(parentId);
-    if (!['Bug', 'Product Backlog Item'].includes(parent.fields['System.WorkItemType'])) throw new Error('Parent must be a Bug or Product Backlog Item');
-    return this.store.create({ kind: 'tasks', language, destination: this.providers.destination(), parent: { id: parent.id, rev: parent.rev, fields: parent.fields }, items: items.map((x, i) => ({ ...x, id: `T${i + 1}` })) });
+  async taskDraft({ parentId, tracker, language, items }) {
+    const ref = resolveTicket(this.providers.config ?? {}, parentId, tracker);
+    const parent = await this.trackers[ref.tracker].loadParent(ref);
+    return this.store.create({ kind: 'tasks', tracker: ref.tracker, language, destination: this.trackers[ref.tracker].destination(parent), parent, items: items.map((x, i) => ({ ...x, id: `T${i + 1}` })) });
   }
   async publish(id) {
     return this.store.withLock(id, async () => {
       const draft = await this.store.read(id);
       const approval = await this.store.approved(draft);
-      if (draft.destination !== this.providers.destination(draft.target)) throw new Error('Destination configuration changed. Create and approve a fresh draft.');
+      if (draft.destination !== this.destinationOf(draft)) throw new Error('Destination configuration changed. Create and approve a fresh draft.');
       const journal = await this.store.journal(id);
       for (const item of draft.items.filter(x => approval.selectedIds.includes(x.id))) {
         if (journal[item.id]?.state === 'posted') continue;
@@ -73,14 +77,14 @@ export class Service {
           const current = await this.providers.review(draft.target);
           if (current.head !== draft.snapshot.head || !['opened', 'open'].includes(current.state)) throw new Error('PR/MR changed or closed since draft creation. Create and approve a fresh draft.');
         } else {
-          const parent = await this.providers.ticket(draft.parent.id);
-          const relevant = fields => Object.fromEntries(['System.WorkItemType', 'System.Title', 'System.Description', 'System.State', 'System.AreaPath', 'System.IterationPath', 'Microsoft.VSTS.Common.AcceptanceCriteria'].map(key => [key, fields[key]]));
-          if (digest(relevant(parent.fields)) !== digest(relevant(draft.parent.fields))) throw new Error('Parent ticket changed. Create and approve a fresh task draft.');
+          const ref = resolveTicket(this.providers.config ?? {}, draft.parent.id, draft.tracker ?? 'azure');
+          const current = await this.tracker(draft).loadParent(ref);
+          if (snapshotChanged(draft.parent, current)) throw new Error('Parent ticket changed. Create and approve a fresh task draft.');
         }
         journal[item.id] = { state: 'attempting', at: new Date().toISOString() };
         await this.store.saveJournal(id, journal);
         try {
-          const result = draft.kind === 'review' ? await this.providers.postFinding(draft.target, draft.snapshot, item) : await this.providers.createTask(draft.parent, item);
+          const result = draft.kind === 'review' ? await this.providers.postFinding(draft.target, draft.snapshot, item) : await this.tracker(draft).createTask(draft.parent, item);
           journal[item.id] = { state: 'posted', remoteId: result.id, url: result.web_url || result.html_url || result.url, at: new Date().toISOString() };
           await this.store.saveJournal(id, journal);
         } catch (error) {

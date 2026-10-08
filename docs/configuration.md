@@ -40,6 +40,12 @@ Restart or reload each assistant afterwards.
 | `AZURE_DEVOPS_ORG_URL` | Azure DevOps | `https://dev.azure.com/<organization>` |
 | `AZURE_DEVOPS_PROJECT` | Azure DevOps | One project per installation |
 | `AZURE_DEVOPS_TOKEN` | Azure DevOps | PAT with Work Items read & write |
+| `JIRA_URL` | Jira | `https://<site>.atlassian.net` or your server |
+| `JIRA_EMAIL` | Jira Cloud | With an API token (Basic auth); leave empty on Server/Data Center (PAT, Bearer) |
+| `JIRA_TOKEN` | Jira | API token or personal access token |
+| `JIRA_ASSIGNEE` / `JIRA_SUBTASK_TYPE` / `JIRA_ACCEPTANCE_FIELD` | optional | Default assignee (Cloud accountId), sub-task type name (default `Sub-task`), custom field holding acceptance criteria |
+| `GITHUB_REPO` / `GITHUB_ASSIGNEE` | GitHub Issues | Default `owner/repo` for issue ids and searches; default assignee login |
+| `TICKET_TRACKER` | optional | Tracker for bare numeric ids: `azure`, `jira` or `github` |
 | `AZURE_DEVOPS_ASSIGNEE` | optional | Email or unique name that created tasks are assigned to; a task can name its own |
 | `SONAR_URL` | Sonar | Default `https://sonarcloud.io` |
 | `SONAR_TOKEN` | Sonar | |

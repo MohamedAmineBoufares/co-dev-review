@@ -2,7 +2,7 @@
 
 **A senior code reviewer for your AI assistant.** co-dev-review is an MCP server that lets Claude Code, Codex, GitHub Copilot, Cursor, Antigravity or any other MCP client review merge requests the way an experienced colleague would. It runs your compiler and linters, checks the callers outside the diff, traces edge cases and algorithmic cost, and posts only the comments you approve.
 
-It also turns Azure DevOps tickets into estimated tasks and helps triage SonarQube results.
+It also turns Azure DevOps, Jira or GitHub tickets into estimated tasks and helps triage SonarQube results.
 
 ```
 You:        Review MR 306 against ticket 54639, comments in French.
@@ -47,7 +47,9 @@ Fill in only what you use:
 | Review GitLab merge requests | `GITLAB_TOKEN` (api scope), `GITLAB_PROJECT_ID` |
 | Review GitHub pull requests | `GITHUB_TOKEN` |
 | Run the compiler, linters and call-site search | `REVIEW_REPO_ROOT`: a local clone of the reviewed repository |
-| Read tickets and create tasks | `AZURE_DEVOPS_ORG_URL`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TOKEN` |
+| Read tickets and create tasks in Azure DevOps | `AZURE_DEVOPS_ORG_URL`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TOKEN` |
+| … in Jira | `JIRA_URL`, `JIRA_TOKEN` (+ `JIRA_EMAIL` on Jira Cloud) |
+| … in GitHub Issues | `GITHUB_TOKEN`, `GITHUB_REPO` |
 | Read Sonar results | `SONAR_TOKEN`, `SONAR_PROJECT_KEY` |
 
 ## Use it

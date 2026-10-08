@@ -24,7 +24,7 @@ export function itemText(item) {
 }
 const heading = draft => draft.kind === 'review'
   ? `${draft.snapshot?.title ?? 'Review'} · ${[draft.target.provider, draft.target.project, `#${draft.target.number}`].filter(Boolean).join(' ')} · head ${String(draft.snapshot?.head).slice(0, 8)}`
-  : `Tasks under work item ${draft.parent?.id}: ${draft.parent?.fields?.['System.Title'] ?? ''}`;
+  : `Tasks under ${{ azure: 'Azure DevOps', jira: 'Jira', github: 'GitHub' }[draft.tracker ?? 'azure']} ${draft.parent?.id}: ${draft.parent?.title ?? draft.parent?.fields?.['System.Title'] ?? ''}`;
 
 // Markdown the assistant shows verbatim: one block per item with its code, so the user can choose in the chat.
 const ICON = { blocker: '🔴', major: '🟠', minor: '🔵', suggestion: '⚪' };

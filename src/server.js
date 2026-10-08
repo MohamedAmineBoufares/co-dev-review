@@ -17,7 +17,8 @@ import { Runs } from './runs.js';
 import { randomUUID } from 'node:crypto';
 import { approveInChat, approveInBrowser, supportsForm, supportsUrl, renderPreview, approveFromConversation, reviseItem } from './approval.js';
 import { packageManagers } from './worktree.js';
-import { reviewContext, ticketContext, ticketSearch, sonarReport } from './review-context.js';
+import { trackerNames, defaultTracker, resolveTicket } from './trackers.js';
+import { reviewContext, sonarReport } from './review-context.js';
 
 const config = loadConfig();
 // Behind a TLS-intercepting proxy the real server is the child; this process only relays stdio.
@@ -171,35 +172,45 @@ async function deterministicPass(r) {
 
 const plannedTask = z.object({
   title: z.string().trim().min(1).max(255),
-  description: text.describe('Final task description in Azure HTML: scope, completion criteria, dependencies and estimate assumptions'),
-  estimatedHours: z.number().positive().max(100000).describe('Required effort estimate in hours, not a promised completion date. Also set as Original Estimate and Remaining Work.'),
-  assignedTo: z.string().trim().min(1).max(256).optional().describe('Azure DevOps identity (email or unique name) to assign this task to; defaults to AZURE_DEVOPS_ASSIGNEE when omitted'),
+  description: text.describe("Final task description in the tracker's format (Azure DevOps HTML, Jira wiki markup, GitHub Markdown): scope, completion criteria, dependencies and estimate assumptions"),
+  estimatedHours: z.number().positive().max(100000).describe('Required effort estimate in hours, not a promised completion date. Azure: Original Estimate and Remaining Work; Jira: Original Estimate; GitHub: written in the body.'),
+  assignedTo: z.string().trim().min(1).max(256).optional().describe('Azure: email or unique name; Jira Cloud: accountId (Server: user name); GitHub: login. Defaults to AZURE_DEVOPS_ASSIGNEE, JIRA_ASSIGNEE or GITHUB_ASSIGNEE'),
 });
-const escapeHtml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-tool('plan_ticket_tasks', 'request.step is one of: search, read, prepare, request_approval, approve, revise, view_draft, publish. Turn an Azure Bug/PBI into clear implementation and testing tasks with estimated hours. Use step=search with a WIQL query, or the id of a saved Azure DevOps query (the GUID in its URL), to find tickets (by assignee, state, iteration, tags, etc.) when you do not already have an id. Start with step=read to understand requirements and existing children. The assistant proposes scope, dependencies, assumptions and total effort; step=prepare saves the plan for approval. Only step=publish creates the approved tasks.', {
+const ticketRef = z.union([
+  z.number().int().positive(),
+  z.string().trim().regex(/^(?:[A-Za-z][A-Za-z0-9_]+-\d+|(?:[\w.-]+\/[\w.-]+)?#\d+|\d+)$/),
+]).describe('Azure work item id (42), Jira key (PROJ-123) or GitHub issue (owner/repo#45, or #45 with GITHUB_REPO)');
+const trackerChoice = z.enum(trackerNames).optional().describe(`Ticket tracker; inferred from the id, else ${defaultTracker(config)} (TICKET_TRACKER)`);
+tool('plan_ticket_tasks', 'request.step is one of: search, read, prepare, request_approval, approve, revise, view_draft, publish. Works with Azure DevOps, Jira and GitHub Issues. Turn a ticket into clear implementation and testing tasks with estimated hours, created under it after approval (Azure child Tasks, Jira sub-tasks, GitHub sub-issues). Use step=search to find tickets: WIQL or a saved query id for Azure, JQL or a filter id for Jira, a search query for GitHub. step=read returns the ticket, its children and discussion. step=prepare saves the plan for approval.', {
   request: z.discriminatedUnion('step', [
     z.object({
-      step: z.literal('search'),
-      wiql: z.string().trim().min(1).max(4000).optional().describe('WIQL query text, e.g. "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.AssignedTo] = @Me AND [System.State] <> \'Closed\' ORDER BY [System.ChangedDate] DESC". Supports @project and @Me macros.'),
-      queryId: z.string().uuid().optional().describe('Id of a saved Azure DevOps query to run instead of ad-hoc WIQL — the GUID from the query\'s URL, e.g. .../_queries/query/<queryId>/'),
+      step: z.literal('search'), tracker: trackerChoice,
+      query: z.string().trim().min(1).max(4000).optional().describe('Azure: WIQL (supports @project, @Me). Jira: JQL, e.g. "assignee = currentUser() AND statusCategory != Done". GitHub: issue search, e.g. "is:open assignee:@me label:bug" (repo:GITHUB_REPO is added when no repo/org is named)'),
+      wiql: z.string().trim().min(1).max(4000).optional().describe('Same as query, for Azure'),
+      queryId: z.string().trim().regex(/^[\w-]{1,64}$/).optional().describe('Azure saved query GUID (from its URL) or Jira filter id'),
     }),
-    z.object({ step: z.literal('read'), ticketId: z.number().int().positive(), continuationToken: z.string().optional(), full: z.boolean().default(false).describe('Every raw Azure field instead of the reviewer-relevant ones, with HTML converted to text') }),
-    z.object({ step: z.literal('prepare'), ticketId: z.number().int().positive(), language, tasks: z.array(plannedTask).min(1).max(50), approval: approvalChoice }),
+    z.object({ step: z.literal('read'), ticketId: ticketRef, tracker: trackerChoice, continuationToken: z.string().optional(), full: z.boolean().default(false).describe('Every raw field instead of the reviewer-relevant ones') }),
+    z.object({ step: z.literal('prepare'), ticketId: ticketRef, tracker: trackerChoice, language, tasks: z.array(plannedTask).min(1).max(50), approval: approvalChoice }),
     ...savedSteps,
   ]),
 }, async ({ request: r }) => {
   if (r.step === 'search') {
-    if (Boolean(r.wiql) === Boolean(r.queryId)) throw new Error('Provide exactly one of wiql or queryId');
-    return ticketSearch(service.providers, r);
+    const query = r.query ?? r.wiql;
+    if (Boolean(query) === Boolean(r.queryId)) throw new Error('Provide exactly one of query or queryId');
+    const tracker = r.tracker ?? defaultTracker(config);
+    return { tracker, ...await service.trackers[tracker].search({ query, queryId: r.queryId }) };
   }
-  if (r.step === 'read') return ticketContext(service.providers, r.ticketId, r.continuationToken, { full: r.full });
+  if (r.step === 'read') {
+    const ref = resolveTicket(config, r.ticketId, r.tracker);
+    return { tracker: ref.tracker, ...await service.trackers[ref.tracker].read(ref, r.continuationToken, { full: r.full }) };
+  }
   if (r.step === 'prepare') {
-    const items = r.tasks.map(task => ({
-      title: task.title, estimatedHours: task.estimatedHours, assignedTo: task.assignedTo,
-      description: task.description + `<p><strong>${r.language === 'fr' ? 'Charge estimée' : 'Estimated effort'}:</strong> ${escapeHtml(task.estimatedHours)} ${r.language === 'fr' ? 'heures' : 'hours'}</p>`,
-    }));
-    const draft = await service.taskDraft({ parentId: r.ticketId, language: r.language, items });
-    return { ...await preview(draft, await requestApproval(draft, r.approval)), totalEstimatedHours: Number(r.tasks.reduce((sum, task) => sum + task.estimatedHours, 0).toFixed(2)), note: 'Estimates are effort hours, saved in task descriptions and set as Original Estimate / Remaining Work (assumes this project\'s Task fields use hours). AssignedTo defaults to AZURE_DEVOPS_ASSIGNEE when a task omits its own assignedTo; unset that env var or override per task to leave a task unassigned or assign someone else. Calendar dates still require availability and dependencies.' };
+    const { tracker: name } = resolveTicket(config, r.ticketId, r.tracker);
+    const tracker = service.trackers[name];
+    const items = r.tasks.map(task => ({ title: task.title, estimatedHours: task.estimatedHours, assignedTo: task.assignedTo, description: task.description + tracker.estimateLine(r.language, task.estimatedHours) }));
+    const draft = await service.taskDraft({ parentId: r.ticketId, tracker: name, language: r.language, items });
+    return { ...await preview(draft, await requestApproval(draft, r.approval)), totalEstimatedHours: Number(r.tasks.reduce((sum, task) => sum + task.estimatedHours, 0).toFixed(2)),
+      note: `Tasks will be created in ${name} under ${draft.parent.id}. Estimates are effort hours, not dates, and are also written in each description. Assignees default to the tracker's configured assignee when a task names none.` };
   }
   return draftStep('tasks', r.step, r.draftId, r.approval, r);
 }, false);

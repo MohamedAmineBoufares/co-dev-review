@@ -56,8 +56,8 @@ export function renderItem(item, position) {
 }
 
 export function renderHeader(draft) {
-  const title = draft.snapshot?.title || draft.parent?.fields?.['System.Title'] || '';
-  const where = draft.target ? `${draft.target.provider} ${draft.target.project ?? ''} #${draft.target.number}` : `work item ${draft.parent?.id}`;
+  const title = draft.snapshot?.title || draft.parent?.title || draft.parent?.fields?.['System.Title'] || '';
+  const where = draft.target ? `${draft.target.provider} ${draft.target.project ?? ''} #${draft.target.number}` : `${{ azure: 'Azure DevOps', jira: 'Jira', github: 'GitHub' }[draft.tracker ?? 'azure']} ${draft.parent?.id}`;
   const facts = [`${draft.items.length} item${draft.items.length === 1 ? '' : 's'}`, draft.language];
   if (draft.snapshot?.head) facts.push(`head ${draft.snapshot.head.slice(0, 8)}`);
   if (draft.coverage?.hunkCount) facts.push(`${draft.coverage.hunkCount} hunks accounted for`);
