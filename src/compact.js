@@ -140,9 +140,9 @@ export function draftSummary(draft) {
   return compactObject({
     id: draft.id, kind: draft.kind, language: draft.language, destination: draft.destination, target: draft.target,
     head: draft.snapshot?.head, parent: draft.parent?.id,
-    items: draft.items.map(item => compactObject({ id: item.id, severity: item.severity, confidence: item.confidence, path: item.path, line: item.line, title: item.title, estimatedHours: item.estimatedHours })),
+    items: draft.items.map(item => compactObject({ id: item.id, severity: item.severity, confidence: item.confidence, path: item.path, line: item.line, lineCorrectedFrom: item.lineCorrectedFrom, title: item.title, estimatedHours: item.estimatedHours })),
     coverage: draft.coverage && { hunkCount: draft.coverage.hunkCount, claimCount: draft.coverage.claims?.length },
-    rubricsApplied: draft.rubricsApplied, deterministic: draft.deterministic,
+    rubricsApplied: draft.rubricsApplied, rubricsSkipped: draft.rubricsSkipped, deterministic: draft.deterministic,
   });
 }
 

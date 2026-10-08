@@ -31,11 +31,11 @@ The parameters of `prepare_comments`:
   - `body`: final Markdown text
   - `severity`: `blocker`, `major`, `minor` or `suggestion`
   - `confidence`: `confirmed`, `likely` or `question`; a blocker must be confirmed
-  - `path` and `line` (optional, together) and `side` (`RIGHT` or `LEFT`)
+  - for an inline comment: `path` plus `lineText`, the exact content of the added (`side: RIGHT`) or removed (`LEFT`) line. The server finds its line number, and refuses text it can't find or that appears more than once. `line` only chooses between identical lines; when it disagrees with the text, the text wins and `lineCorrectedFrom` records the change
 - **`coverage`**: one or more `{ hunks, verdict, note? }` claims that together give every hunk in the ledger exactly one verdict:
   - `hunks`: `7.2`, `7.*`, `7.2-7.5` or a comma-separated mix
   - `verdict`: `finding`, `reviewed-clean` or `not-applicable`
-- **`rubricsApplied`**: the rubric and repository skill names actually applied. They are shown to the approver.
+- **`rubricsApplied`** and **`rubricsSkipped`**: every rubric skill routed by `read` must be in one of them; a skip needs a reason (15+ characters). Both are shown to the approver, and a draft that leaves a routed rubric unaccounted for is rejected.
 - **`deterministic`**: `{ checks, blastRadius, tests? }`, each `{ runId }` from a run on this head and base, or `{ skipped: "<reason, 20+ characters>" }`. `tests` is optional and verified the same way when given.
 - **`approval`**: `default` (the `REVIEW_APPROVAL` setting, `conversation` unless changed), `conversation`, `in-chat`, `browser`, `terminal` or `auto`.
 

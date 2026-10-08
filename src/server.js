@@ -39,8 +39,9 @@ const finding = z.object({
   severity: z.enum(['blocker', 'major', 'minor', 'suggestion']),
   confidence: z.enum(['confirmed', 'likely', 'question']).describe('After trying to refute the finding: confirmed = trigger named and no protection found; likely = plausible, protection not ruled out; question = needs the author\'s knowledge, written as a question'),
   path: z.string().min(1).optional(), line: z.number().int().positive().optional(), side: z.enum(['LEFT', 'RIGHT']).default('RIGHT'),
+  lineText: z.string().min(1).max(500).optional().describe('Preferred anchor: the exact content of the added (RIGHT) or removed (LEFT) line, without its +/- prefix. The server finds its line number; do not count lines. line, when also given, only picks between identical lines'),
 }).superRefine((value, ctx) => {
-  if (Boolean(value.path) !== Boolean(value.line)) ctx.addIssue({ code: 'custom', message: 'path and line must be provided together' });
+  if (Boolean(value.path) !== Boolean(value.line || value.lineText)) ctx.addIssue({ code: 'custom', message: 'An inline comment needs path plus lineText (or line); a general comment has neither' });
   // A blocker the reviewer could not confirm is the comment that costs a reviewer their credibility.
   if (value.severity === 'blocker' && value.confidence !== 'confirmed') ctx.addIssue({ code: 'custom', message: 'A blocker must be confirmed: name its trigger and rule out existing protection, or lower its severity' });
 });
@@ -142,7 +143,7 @@ tool('review_work', 'request.step is one of: read, read_file, rubric, pipeline, 
     z.object({ step: z.literal('blast_radius'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD'), detail: z.enum(['summary', 'full']).default('summary').describe('summary keeps results short; full returns every finding or caller'), symbols: z.array(z.string().min(1).max(64)).max(10).optional().describe('Expand every caller of these symbols only') }),
     z.object({ step: z.literal('pipeline'), target }),
     z.object({ step: z.literal('tests'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD') }),
-    z.object({ step: z.literal('prepare_comments'), target, language, items: z.array(finding).min(1).max(100), coverage, rubricsApplied: z.array(z.string().trim().min(1).max(64)).max(20).describe('Names of the rubric skills and repository skills you actually read and applied for this review, e.g. ["review-react-ts", "house-style"]. An empty array is accepted and is shown to the approver as such.'), deterministic, approval: approvalChoice }),
+    z.object({ step: z.literal('prepare_comments'), target, language, items: z.array(finding).min(1).max(100), coverage, rubricsApplied: z.array(z.string().trim().min(1).max(64)).max(20).describe('Names of the rubric skills and repository skills you actually read and applied for this review, e.g. ["review-react-ts", "house-style"]. Every rubric skill routed by read must be here or in rubricsSkipped.'), rubricsSkipped: z.array(z.object({ name: z.string().trim().min(1).max(64), reason: z.string().trim().min(15).max(300) })).max(20).default([]).describe('Routed rubrics you deliberately did not apply, each with a reason the approver sees'), deterministic, approval: approvalChoice }),
     ...savedSteps,
   ]),
 }, async ({ request: r }) => {

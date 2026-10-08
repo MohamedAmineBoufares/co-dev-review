@@ -99,7 +99,8 @@ A failing test turns "this looks wrong" into a confirmed finding. A project whos
 - **Every hunk gets a verdict.** `step=read` returns one ledger entry per changed hunk, with an id `<file index>.<hunk index>` that stays stable across pagination. `prepare_comments` requires `finding`, `reviewed-clean` or `not-applicable` for every hunk (`7.*` for a whole file, `7.2-7.5` for a range), and names any hunk that is missing.
 - **The deterministic passes must have run on this review.** (`tests` is optional, and checked the same way when given.) Each `checks` and `blast_radius` call returns a `runId`, recorded with the commit and base it analysed. `prepare_comments` requires `deterministic: { checks, blastRadius }`, each `{ runId }` or `{ skipped: "<reason>" }`. A run on another commit, another base or an empty range is rejected. A skip and its reason are shown to you at approval.
 - **Findings carry a confidence.** After trying to refute each finding (full file, caller, callee, whether the trigger can reach production), the reviewer marks it `confirmed`, `likely` or `question`. A `blocker` must be `confirmed`, and a `question` is written as a question.
-- **Inline comments land on real changed lines.** Anchors are checked against added or deleted lines at the reviewed commit; context lines go into a general comment.
+- **Every routed rubric is accounted for.** A draft must list each rubric routed for the changed files as applied, or as skipped with a reason that the approver sees.
+- **Inline comments land on real changed lines.** Comments are anchored by the text of the changed line (`lineText`), and the server finds the line number, so hand-counted lines can't drift by one. Anchors are checked against added or deleted lines at the reviewed commit; context lines go into a general comment.
 
 ## What the review actually did: the trace
 

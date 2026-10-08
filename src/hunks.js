@@ -79,6 +79,26 @@ export function anchorContext(files, path, line, side = 'RIGHT', radius = 5) {
   return undefined;
 }
 
+// Line numbers counted by hand drift by one; the text of the line does not. Finds the added (RIGHT) or
+// removed (LEFT) line of a patch whose content equals the given text, preferring the one nearest a hint.
+export function findChangedLine(patch, side, text, near) {
+  const wanted = String(text).trim();
+  const candidates = [];
+  for (const hunk of fileHunks('', patch)) {
+    let oldLine = hunk.oldStart, newLine = hunk.newStart;
+    for (const line of hunk.lines) {
+      if (side === 'RIGHT' && line.startsWith('+') && line.slice(1).trim() === wanted) candidates.push(newLine);
+      if (side === 'LEFT' && line.startsWith('-') && line.slice(1).trim() === wanted) candidates.push(oldLine);
+      if (!line.startsWith('+')) oldLine++;
+      if (!line.startsWith('-')) newLine++;
+    }
+  }
+  if (!candidates.length) return { error: `no ${side === 'RIGHT' ? 'added' : 'removed'} line reads "${wanted.slice(0, 80)}"` };
+  if (candidates.length === 1) return { line: candidates[0] };
+  if (near) return { line: candidates.reduce((best, line) => (Math.abs(line - near) < Math.abs(best - near) ? line : best)) };
+  return { error: `"${wanted.slice(0, 80)}" appears on lines ${candidates.join(', ')}; pass line as well to choose one` };
+}
+
 // Accepts "7.2", a whole file as "7.*", a range as "7.2-7.5", and any comma-separated mix.
 export function expandIds(spec, entries = []) {
   const ids = [];

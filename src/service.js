@@ -1,6 +1,7 @@
 import { Store, digest } from './store.js';
 import { Providers } from './providers.js';
-import { ledger, coverageGaps, anchorContext } from './hunks.js';
+import { ledger, coverageGaps, anchorContext, changedPaths, findChangedLine } from './hunks.js';
+import { suggestRubrics } from './rubrics.js';
 import { Runs, verifyDeterministic } from './runs.js';
 import { makeTrackers, resolveTicket, snapshotChanged } from './trackers.js';
 
@@ -20,11 +21,11 @@ export function anchors(patch = '') {
   return { LEFT: left, RIGHT: right };
 }
 export class Service {
-  constructor(config, { providers = new Providers(config), store = new Store(), runs = new Runs(), trackers = makeTrackers(providers) } = {}) { this.providers = providers; this.store = store; this.runs = runs; this.trackers = trackers; }
+  constructor(config, { providers = new Providers(config), store = new Store(), runs = new Runs(), trackers = makeTrackers(providers), routeRubrics = paths => suggestRubrics(paths).rubrics } = {}) { this.providers = providers; this.store = store; this.runs = runs; this.trackers = trackers; this.routeRubrics = routeRubrics; }
   // Tasks belong to whichever tracker holds the parent ticket; drafts saved before trackers existed are Azure.
   tracker(draft) { return this.trackers[draft.tracker ?? 'azure']; }
   destinationOf(draft) { return draft.kind === 'review' ? this.providers.destination(draft.target) : this.tracker(draft).destination(draft.parent); }
-  async reviewDraft({ target, language, items, coverage = [], rubricsApplied = [], deterministic }) {
+  async reviewDraft({ target, language, items, coverage = [], rubricsApplied = [], rubricsSkipped = [], deterministic }) {
     target = { ...target, project: target.project || this.providers.config.GITLAB_PROJECT_ID };
     const snapshot = await this.providers.review(target);
     if (!['opened', 'open'].includes(snapshot.state)) throw new Error('Review is not open');
@@ -42,10 +43,23 @@ export class Service {
     const entries = ledger(files);
     const gaps = coverageGaps(entries, coverage);
     if (gaps.length) throw new Error(`No verdict for ${gaps.length} of ${entries.length} hunks: ${gaps.slice(0, 25).join(', ')}${gaps.length > 25 ? ', …' : ''}. Read them, then give each a verdict in coverage.`);
+    // The skill says to load every routed rubric; a declared list that leaves some out is how a review
+    // quietly loses its correctness or complexity pass. Each one is applied, or skipped with a reason the approver sees.
+    const routed = [...new Set(this.routeRubrics(changedPaths(files)).map(r => r.skill).filter(Boolean))];
+    const accounted = new Set([...rubricsApplied, ...rubricsSkipped.map(x => x.name)]);
+    const missing = routed.filter(skill => !accounted.has(skill));
+    if (missing.length) throw new Error(`Rubrics routed for this change but neither applied nor skipped: ${missing.join(', ')}. Load each skill (or fetch it with step=rubric), review the change against it, and list it in rubricsApplied; or declare it in rubricsSkipped with a reason.`);
     for (const item of items) {
       if (!item.path) continue;
       const file = files.find(f => (f.new_path || f.filename) === item.path);
-      if (!file || file.too_large || file.collapsed || !anchors(file.diff ?? file.patch)[item.side].has(item.line)) throw new Error(`Invalid or unavailable changed-line anchor: ${item.path}:${item.line}`);
+      if (!file || file.too_large || file.collapsed) throw new Error(`No diff available for ${item.path}`);
+      if (item.lineText) {
+        const found = findChangedLine(file.diff ?? file.patch, item.side, item.lineText, item.line);
+        if (found.error) throw new Error(`Cannot anchor on ${item.path}: ${found.error}`);
+        if (item.line && item.line !== found.line) item.lineCorrectedFrom = item.line;
+        item.line = found.line;
+      }
+      if (!item.line || !anchors(file.diff ?? file.patch)[item.side].has(item.line)) throw new Error(`Invalid or unavailable changed-line anchor: ${item.path}:${item.line}. Anchor on an added or removed line, preferably with lineText.`);
       if (target.provider === 'gitlab') {
         if (!snapshot.refs?.base_sha || !snapshot.refs?.start_sha || snapshot.refs.head_sha !== snapshot.head) throw new Error('GitLab diff refs are unavailable or still being calculated');
         item.oldPath = file.old_path;
@@ -55,9 +69,9 @@ export class Service {
     if (current.head !== snapshot.head) throw new Error('Review changed while loading diffs; retry');
     return this.store.create({ kind: 'review', language, target, destination: this.providers.destination(target),
       snapshot: { head: snapshot.head, refs: snapshot.refs, title: snapshot.title, url: snapshot.url },
-      coverage: { hunkCount: entries.length, claims: coverage }, rubricsApplied, deterministic: evidence,
+      coverage: { hunkCount: entries.length, claims: coverage }, rubricsApplied, rubricsSkipped, deterministic: evidence,
       // Captured now so approval can show the code a comment lands on, without a second fetch.
-      items: items.map((x, i) => ({ ...x, id: `R${i + 1}`, context: x.path ? anchorContext(files, x.path, x.line, x.side) : undefined })) });
+      items: items.map(({ lineText, ...x }, i) => ({ ...x, id: `R${i + 1}`, context: x.path ? anchorContext(files, x.path, x.line, x.side) : undefined })) });
   }
   async taskDraft({ parentId, tracker, language, items }) {
     const ref = resolveTicket(this.providers.config ?? {}, parentId, tracker);

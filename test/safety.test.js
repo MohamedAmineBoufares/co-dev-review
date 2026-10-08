@@ -26,7 +26,7 @@ async function fixture(t) {
     createTask: async (_parent, item) => { state.posts.push(item); return { id: state.posts.length }; },
   };
   const runs = new Runs(path.join(root, 'runs'));
-  const service = new Service({}, { store, providers, runs });
+  const service = new Service({}, { store, providers, runs, routeRubrics: () => [] });
   const draft = () => service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'fr', items: [{ body: 'Corriger ce défaut.', severity: 'blocker', path: 'new.js', line: 1, side: 'RIGHT' }, { body: 'Suggestion facultative.', severity: 'minor' }], coverage: [{ hunks: '1.1', verdict: 'finding' }], deterministic: skippedPasses });
   return { store, state, providers, service, draft, runs };
 }
@@ -225,4 +225,26 @@ test('a draft edited after it was shown must be shown again; revise does that', 
   const outcome = await approveFromConversation(service, d.id, { selectedIds: ['R2'], userWords: 'ok approve R2', publish: false });
   assert.equal(outcome.status, 'approved', '"later" approves without posting');
   assert.equal(state.posts.length, 0);
+});
+
+test('every routed rubric must be applied or skipped with a reason', async t => {
+  const { store, providers, runs } = await fixture(t);
+  const service = new Service({}, { store, providers, runs });
+  const request = { target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor' }], coverage: [{ hunks: '1.1', verdict: 'reviewed-clean' }], deterministic: skippedPasses };
+  await assert.rejects(service.reviewDraft({ ...request, rubricsApplied: ['review-mr'] }), /neither applied nor skipped: review-correctness, review-complexity, review-design/);
+  const d = await service.reviewDraft({ ...request, rubricsApplied: ['review-correctness', 'review-complexity', 'review-react-ts'], rubricsSkipped: [{ name: 'review-design', reason: 'One-line config change' }, { name: 'review-tests', reason: 'No behaviour changed here' }] });
+  assert.equal(d.rubricsSkipped[1].name, 'review-tests', 'skips are stored for the approver');
+});
+
+test('inline comments anchor on the text of the changed line, not a counted number', async t => {
+  const { service, providers } = await fixture(t);
+  providers.diffs = async () => [{ new_path: 'new.js', old_path: 'new.js', diff: '@@ -1,3 +1,5 @@\n a\n+const x = 1;\n b\n+return x;\n+const x = 1;' }];
+  const request = { target: { provider: 'gitlab', number: 1 }, language: 'en', coverage: [{ hunks: '1.1', verdict: 'finding' }], deterministic: skippedPasses };
+  const d = await service.reviewDraft({ ...request, items: [{ body: 'r', severity: 'minor', path: 'new.js', lineText: '  return x;', side: 'RIGHT' }, { body: 'c', severity: 'minor', path: 'new.js', lineText: 'const x = 1;', line: 4, side: 'RIGHT' }] });
+  assert.equal(d.items[0].line, 4, 'found by text');
+  assert.equal(d.items[0].lineText, undefined, 'the text is only used to resolve the anchor');
+  assert.equal(d.items[1].line, 5, 'between identical lines, the one nearest the hint');
+  assert.equal(d.items[1].lineCorrectedFrom, 4);
+  await assert.rejects(service.reviewDraft({ ...request, items: [{ body: 'r', severity: 'minor', path: 'new.js', lineText: 'const x = 1;', side: 'RIGHT' }] }), /appears on lines 2, 5/);
+  await assert.rejects(service.reviewDraft({ ...request, items: [{ body: 'r', severity: 'minor', path: 'new.js', lineText: 'nowhere', side: 'RIGHT' }] }), /no added line reads "nowhere"/);
 });

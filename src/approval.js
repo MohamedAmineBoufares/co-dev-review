@@ -47,7 +47,7 @@ export function renderPreview(draft, onlyIds) {
   const verb = draft.kind === 'review' ? 'post' : 'create';
   return [
     `## ${draft.kind === 'review' ? 'Review comments' : 'Tasks'} to approve · draft \`${draft.id.slice(0, 8)}\``,
-    `${heading(draft)}  \n${draft.destination}  \n${items.length} item(s): ${counts}`,
+    `${heading(draft)}  \n${draft.destination}  \n${items.length} item(s): ${counts}${draft.rubricsApplied ? `  \nRubrics applied: ${draft.rubricsApplied.join(', ') || 'none'}` : ''}${draft.rubricsSkipped?.length ? `  \n⚠ Skipped: ${draft.rubricsSkipped.map(x => `${x.name} (${x.reason})`).join('; ')}` : ''}`,
     ...blocks,
     '---',
     `Reply **approve all**, **approve R1 R3**, **approve all except R2** or **cancel**. Add "later" to approve without ${verb === 'post' ? 'posting' : 'creating'} now. You can also ask to reword an item first.`.replace(/R(\d)/g, draft.kind === 'review' ? 'R$1' : 'T$1'),
