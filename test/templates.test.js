@@ -21,7 +21,7 @@ test('rendering includes the persona, fills values, falls back, and requires req
   const text = renderTemplate(templates, 'review-mr', { target: '306', language: 'fr' });
   assert.ok(text.startsWith('# Who you are'), 'the persona comes first');
   assert.match(text, /review merge request 306/);
-  assert.match(text, /find it in the branch name or the MR title/, 'an omitted optional argument shows its fallback');
+  assert.match(text, /look for the work item id in the branch name/, 'an omitted optional argument shows its fallback');
   assert.equal(/\{\{/.test(text), false, 'no placeholder survives');
   assert.throws(() => renderTemplate(templates, 'review-mr', {}), /needs: target/);
   assert.throws(() => renderTemplate(templates, '_persona', {}), /Unknown template/);
@@ -30,7 +30,7 @@ test('rendering includes the persona, fills values, falls back, and requires req
 test('every packaged template is well formed', () => {
   const templates = loadTemplates([packaged]);
   const names = [...templates.values()].filter(t => !t.partial).map(t => t.name).sort();
-  assert.deepEqual(names, ['explain-ticket', 'fix-pipeline', 'fix-sonar', 'plan-ticket', 'qa-ticket', 'review-local', 'review-mr']);
+  assert.deepEqual(names, ['address-threads', 'explain-ticket', 'fix-pipeline', 'fix-sonar', 'plan-ticket', 'qa-ticket', 'review-local', 'review-mr']);
   for (const t of templates.values()) assert.deepEqual(lintTemplate(templates, t), [], t.name);
 });
 

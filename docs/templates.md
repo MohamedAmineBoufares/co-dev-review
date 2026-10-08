@@ -27,6 +27,7 @@ co-dev-review template review-mr target=306 language=fr
 | `review-mr` | Review a GitLab MR or GitHub PR and post approved comments | `target`, `language?`, `ticket?`, `depth?` |
 | `review-local` | Review your own branch before pushing; nothing is posted | `base?`, `ticket?` |
 | `plan-ticket` | Split a ticket into estimated tasks and create them after approval | `ticket`, `language?`, `capacity?` |
+| `address-threads` | Pull the open review threads of an MR, check each against the code, and get a ready-to-paste prompt for an agent to address them | `target`, `include?`, `language?` |
 | `explain-ticket` | Understand a ticket: the need, the vocabulary, where it lives in the code, the open questions | `ticket` |
 | `qa-ticket` | Build a test plan from the acceptance criteria and run it locally | `ticket`, `target?`, `url?` |
 | `fix-sonar` | Triage the Sonar gate and issues of an MR, then fix them | `target` |

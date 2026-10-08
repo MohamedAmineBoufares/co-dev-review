@@ -18,7 +18,7 @@ test('real MCP stdio handshake, discovery, prompt and validation', { timeout: 20
   const prompt = await client.getPrompt({ name: 'review_workflow', arguments: { language: 'fr' } });
   assert.match(prompt.messages[0].content.text, /Publication language: fr/);
   const { prompts } = await client.listPrompts();
-  assert.ok(['review-mr', 'review-local', 'plan-ticket', 'explain-ticket', 'qa-ticket', 'fix-sonar', 'fix-pipeline'].every(name => prompts.some(p => p.name === name)), 'every template is offered as a prompt');
+  assert.ok(['address-threads', 'review-mr', 'review-local', 'plan-ticket', 'explain-ticket', 'qa-ticket', 'fix-sonar', 'fix-pipeline'].every(name => prompts.some(p => p.name === name)), 'every template is offered as a prompt');
   assert.equal(prompts.some(p => p.name === '_persona'), false, 'partials are not prompts');
   const started = await client.getPrompt({ name: 'review-mr', arguments: { target: '306', language: 'fr' } });
   assert.ok(started.messages[0].content.text.includes('You are **co-dev**'), 'the persona opens every template');
