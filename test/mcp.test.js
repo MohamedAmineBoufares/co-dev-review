@@ -17,6 +17,12 @@ test('real MCP stdio handshake, discovery, prompt and validation', { timeout: 20
   for (const tool of tools) assert.match(tool.description, tool.name === 'review_sonar' ? /Sonar/ : /^request\.step is one of: /, 'workflow tool descriptions must carry the step list in case a client flattens the schema');
   const prompt = await client.getPrompt({ name: 'review_workflow', arguments: { language: 'fr' } });
   assert.match(prompt.messages[0].content.text, /Publication language: fr/);
+  const { prompts } = await client.listPrompts();
+  assert.ok(['review-mr', 'review-local', 'plan-ticket', 'explain-ticket', 'qa-ticket', 'fix-sonar', 'fix-pipeline'].every(name => prompts.some(p => p.name === name)), 'every template is offered as a prompt');
+  assert.equal(prompts.some(p => p.name === '_persona'), false, 'partials are not prompts');
+  const started = await client.getPrompt({ name: 'review-mr', arguments: { target: '306', language: 'fr' } });
+  assert.ok(started.messages[0].content.text.includes('You are **co-dev**'), 'the persona opens every template');
+  assert.match(started.messages[0].content.text, /review merge request 306/);
   const invalid = await client.callTool({ name: 'review_work', arguments: { request: { step: 'prepare_comments', target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor', path: 'x' }] } } });
   assert.equal(invalid.isError, true);
   const missingEstimate = await client.callTool({ name: 'plan_ticket_tasks', arguments: { request: { step: 'prepare', ticketId: 42, language: 'en', tasks: [{ title: 'Fix', description: 'Test it' }] } } });

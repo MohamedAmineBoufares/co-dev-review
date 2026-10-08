@@ -10,6 +10,7 @@ import { init, uninstall, importConfig } from './init.js';
 import { clients } from './clients.js';
 import { linkSkills } from './skill-links.js';
 import { listWorktrees, removeWorktree } from './worktree.js';
+import { loadTemplates, renderTemplate, templateDirs } from './templates.js';
 import { relaunchWithExtraCa } from './ca.js';
 
 // One line per server call, grouped by what was being reviewed, so a review's protocol is
@@ -128,6 +129,8 @@ const HELP = `co-dev-review <command>
   approve [draft]            inspect and approve a draft in this terminal
   pending                    list drafts and their state
   worktrees [remove <n|all>] list or safely remove review worktrees
+  templates                  list the conversation templates
+  template <name> [k=v ...]  print a template filled in, to paste into any assistant
   trace [n]                  what the last reviews actually did
   link-skills [client...] [--dry-run] [--force]
   import-config <mcp.json>   import allowlisted settings from another MCP configuration
@@ -152,6 +155,21 @@ async function main() {
     return;
   }
   if (command === 'doctor') { if (!await doctor(loadConfig())) process.exitCode = 1; return; }
+  if (command === 'templates') {
+    const all = [...loadTemplates().values()].filter(t => !t.partial);
+    for (const t of all) console.log(`${style.bold(t.name.padEnd(16))} ${safe(t.title)}
+${' '.repeat(17)}${style.dim(t.args.map(a => `${a.name}${a.required ? '' : '?'}`).join(' '))}`);
+    console.log(style.dim(`
+Print one, filled in: co-dev-review template review-mr target=306 language=fr
+Your own templates go in ${templateDirs()[1]} (same name overrides).`));
+    return;
+  }
+  if (command === 'template') {
+    if (!arg) throw new Error('Usage: co-dev-review template <name> [key=value ...]');
+    const values = Object.fromEntries(rest.slice(1).map(pair => { const i = pair.indexOf('='); return i > 0 ? [pair.slice(0, i), pair.slice(i + 1)] : [pair, '']; }));
+    console.log(renderTemplate(loadTemplates(), arg, values));
+    return;
+  }
   if (command === 'worktrees') {
     const config = loadConfig();
     const all = await listWorktrees(config);

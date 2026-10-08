@@ -79,7 +79,7 @@ Every response is compact JSON, and each tool returns what a reviewer or planner
 
 ## Prompt
 
-`review_workflow` (argument: `language`) returns the full workflow as a prompt, for clients that surface MCP prompts as commands.
+`review_workflow` (argument: `language`) returns the full workflow as a prompt. Every template in `templates/` is also a prompt (`review-mr`, `review-local`, `plan-ticket`, `explain-ticket`, `qa-ticket`, `fix-sonar`, `fix-pipeline`, and your own); see [Templates](templates.md).
 
 ## Pagination and partial data
 

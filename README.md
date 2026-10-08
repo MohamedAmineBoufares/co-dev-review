@@ -68,6 +68,16 @@ Talk to your assistant normally:
 
 In assistants that load skills (Claude Code, Codex, Copilot), the `review-mr` skill runs the complete sequence: just ask for a review, or invoke it directly (`/review-mr 123 fr`; `/co-dev-review:review-mr 123 fr` when loaded as a Claude Code plugin).
 
+### Starting a session from a template
+
+Each task has a ready-made opening message: who the assistant is, its rules, the steps and the expected answer. Use them as slash commands (`/mcp__co-dev-review__review-mr 306 fr` in Claude Code), or print one to paste anywhere:
+
+```bash
+co-dev-review template explain-ticket ticket=PROJ-123
+```
+
+The templates: `review-mr`, `review-local`, `plan-ticket`, `explain-ticket`, `qa-ticket`, `fix-sonar` and `fix-pipeline`. You can override them or add your own: see [Templates](docs/templates.md).
+
 ### Approving what gets posted
 
 When the comments or tasks are ready, the assistant shows them right in the chat. Each one shows its severity, `file:line`, the code it lands on and the text. You reply:
@@ -105,6 +115,7 @@ Any other MCP client works with a manual entry from [`examples/`](examples/).
 | `co-dev-review approve [draft]` | Approve a draft in the terminal |
 | `co-dev-review pending` | List drafts and their state |
 | `co-dev-review worktrees [remove <n>]` | List or safely remove review worktrees |
+| `co-dev-review template <name> k=v…` | Print a conversation template, filled in |
 | `co-dev-review trace` | Show what the last reviews actually did |
 | `co-dev-review uninstall` | Remove the registrations and skill links |
 | `co-dev-review help` | All commands and options |
@@ -116,6 +127,7 @@ Any other MCP client works with a manual entry from [`examples/`](examples/).
 - [How a review works](docs/how-reviews-work.md): rubrics, worktree, compiler pass, blast radius, coverage ledger, evidence rules, trace
 - [Configuration](docs/configuration.md): every setting, where state lives, assistant registration, corporate proxies
 - [Approval and safety](docs/approval-and-safety.md): approval modes, what the model can and cannot do, failure recovery
+- [Templates](docs/templates.md): conversation starters per task, and how to write your own
 - [Tool reference](docs/tools.md): the MCP tools and their steps, for client implementers
 
 ## Project layout
@@ -123,6 +135,7 @@ Any other MCP client works with a manual entry from [`examples/`](examples/).
 ```
 src/          MCP server, CLI and providers (GitLab, GitHub, Azure DevOps, Sonar)
 skills/       review rubrics as SKILL.md files (review-mr is the entry point)
+templates/    conversation starters per task, served as MCP prompts
 docs/         documentation
 examples/     manual MCP client configuration
 test/         node:test suite; never calls real services

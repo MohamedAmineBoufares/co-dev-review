@@ -10,6 +10,7 @@ import { runChecks, runnerNames } from './checks.js';
 import { blastRadius } from './blast-radius.js';
 import { runTests } from './tests.js';
 import { pipelineReport } from './pipeline.js';
+import { loadTemplates, renderTemplate } from './templates.js';
 import { draftSummary, sliceLines } from './compact.js';
 import { readSkills } from './repo-skills.js';
 import { record, summarize } from './trace.js';
@@ -233,5 +234,14 @@ tool('review_sonar', 'Inspect a PR/MR and its Sonar quality gate, coverage, dupl
   return { review: { title: review.title, url: review.url, head: review.head, sourceBranch: review.sourceBranch, targetBranch: review.targetBranch, state: review.state }, sonar: report, source, note: 'Sonar data is scoped to this PR/MR number. Its analysis commit has not been verified against the current head. Inspect rules and code, apply authorized fixes in the matching local checkout, run relevant tests, and verify a new analysis before claiming Sonar is resolved.' };
 });
 server.registerPrompt('review_workflow', { description: 'Evidence-based bilingual review with ticket verification, Sonar analysis, and explicit human approval', argsSchema: { language: language.optional() } }, ({ language = 'en' }) => ({ messages: [{ role: 'user', content: { type: 'text', text: `${workflow}\nPublication language: ${language}` } }] }));
+
+// Conversation starters: each template becomes a prompt the assistant lists as a slash command.
+const templates = loadTemplates();
+for (const template of templates.values()) {
+  if (template.partial || template.name === 'review_workflow') continue;
+  const argsSchema = Object.fromEntries(template.args.map(arg => [arg.name, arg.required ? z.string().min(1).describe(arg.description) : z.string().optional().describe(arg.description)]));
+  server.registerPrompt(template.name, { title: template.title, description: template.description, argsSchema },
+    values => ({ messages: [{ role: 'user', content: { type: 'text', text: renderTemplate(templates, template.name, values) } }] }));
+}
 
 await server.connect(new StdioServerTransport());

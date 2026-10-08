@@ -28,9 +28,16 @@ for (const name of skills) {
 const routed = [...fs.readFileSync(path.join(root, 'src', 'rubrics.js'), 'utf8').matchAll(/skill: '([\w-]+)'/g)].map(m => m[1]);
 for (const name of new Set(routed)) if (!skills.includes(name)) problems.push(`src/rubrics.js routes to "${name}", which is not in skills/`);
 
+const { loadTemplates, lintTemplate } = await import('../src/templates.js');
+const packagedTemplates = loadTemplates([path.join(root, 'templates')]);
+for (const template of packagedTemplates.values()) {
+  if (!template.partial && !template.description) problems.push(`templates/${template.name}.md: missing description`);
+  for (const problem of lintTemplate(packagedTemplates, template)) problems.push(`templates/${template.name}.md: ${problem}`);
+}
+
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const plugin = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
 if (pkg.version !== plugin.version) problems.push(`package.json ${pkg.version} and .claude-plugin/plugin.json ${plugin.version} disagree`);
 
 if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }
-else console.log(`ok: ${sources.length} modules, ${skills.length} skills, ${new Set(routed).size} routed rubrics, version ${pkg.version}`);
+else console.log(`ok: ${sources.length} modules, ${skills.length} skills, ${[...packagedTemplates.values()].filter(t => !t.partial).length} templates, ${new Set(routed).size} routed rubrics, version ${pkg.version}`);
