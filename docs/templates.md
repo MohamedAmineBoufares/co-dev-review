@@ -2,39 +2,193 @@
 
 A template is the first message of a session for one kind of task. It tells the assistant who it is, the rules it works by, the steps of the task and the shape of the answer you expect. You start from a known, good opening instead of retyping instructions.
 
-## Using them
+## Which one do I need?
 
-**As a slash command.** The server publishes every template as an MCP prompt. Most assistants list a server's prompts as commands:
-
-| Assistant | Example |
+| I want to… | Template |
 | --- | --- |
-| Claude Code | `/mcp__co-dev-review__review-mr 306 fr` |
-| VS Code (Copilot) | `/mcp.co-dev-review.review-mr` (it asks for the arguments) |
-| Other MCP clients | Look for "prompts" or the server's commands in the client |
+| Understand a ticket before touching it | [`explain-ticket`](#explain-ticket) |
+| Split a ticket into estimated tasks in the tracker | [`plan-ticket`](#plan-ticket) |
+| Implement a ticket, or get a prompt for an agent to implement it | [`work-ticket`](#work-ticket) |
+| Check my own branch before pushing | [`review-local`](#review-local) |
+| Test a ticket against its acceptance criteria on my machine | [`qa-ticket`](#qa-ticket) |
+| Review someone else's MR/PR and post comments | [`review-mr`](#review-mr) |
+| Handle the review comments I received on my MR | [`address-threads`](#address-threads) |
+| Understand and fix a red pipeline | [`fix-pipeline`](#fix-pipeline) |
+| Clean up the Sonar issues of my MR | [`fix-sonar`](#fix-sonar) |
 
-**By copy-paste.** For any assistant, print a filled-in template and paste it as your first message:
+## How to start one
+
+**As a slash command.** The server publishes every template as an MCP prompt:
+
+| Assistant | How |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__<name>` followed by the values, separated by spaces, **in the order of the argument table** |
+| Claude Desktop | **+** → co-dev-review → pick the template; it shows a form |
+| VS Code (Copilot) | `/mcp.co-dev-review.<name>`; it asks for each argument |
+| Other MCP clients | Look for "prompts" or the server's commands |
+
+In Claude Code the values are positional: to give the third argument, also give the first two.
+
+**By copy-paste**, for any assistant (Copilot CLI, Codex…). Print a filled-in template and paste it as your first message. Arguments are `name=value`, in any order, so you can skip any optional one:
 
 ```bash
 co-dev-review template review-mr target=306 language=fr
 ```
 
-`co-dev-review templates` lists them all, with their arguments (`?` marks optional ones).
+`co-dev-review templates` lists all templates with their arguments.
+
+### Ticket and MR values
+
+| You write | Means |
+| --- | --- |
+| `42` | Work item 42 in Azure DevOps (or in the tracker set by `TICKET_TRACKER`) |
+| `PROJ-123` | Jira issue PROJ-123 |
+| `owner/repo#45` | GitHub issue 45 of owner/repo |
+| `306` | MR/PR 306 of the default project (`GITLAB_PROJECT_ID` or `GITHUB_REPO`) |
+| `github owner/repo 12` | PR 12 of another GitHub repository |
 
 ## The templates
 
-| Name | Use it to | Arguments |
-| --- | --- | --- |
-| `review-mr` | Review a GitLab MR or GitHub PR and post approved comments | `target`, `language?`, `ticket?`, `depth?` |
-| `review-local` | Review your own branch before pushing; nothing is posted | `base?`, `ticket?` |
-| `plan-ticket` | Split a ticket into estimated tasks and create them after approval | `ticket`, `language?`, `capacity?` |
-| `address-threads` | Pull the open review threads of an MR, check each against the code, and get a ready-to-paste prompt for an agent to address them | `target`, `include?`, `language?` |
-| `work-ticket` | Start a ticket: pull its acceptance criteria, name the branch and conversation after it, then write a prompt for a coding agent or implement it to review-ready quality (tests, self-review against every rubric), and finish with a detailed PR description | `ticket`, `mode?`, `base?`, `branch?` |
-| `explain-ticket` | Understand a ticket: the need, the vocabulary, where it lives in the code, the open questions | `ticket` |
-| `qa-ticket` | Build a test plan from the acceptance criteria and run it locally | `ticket`, `target?`, `url?` |
-| `fix-sonar` | Triage the Sonar gate and issues of an MR, then fix them | `target` |
-| `fix-pipeline` | Explain the failing CI stages of an MR and fix them | `target` |
+An argument marked **no** in the Required column can be left out; the "If omitted" column says what happens then.
 
-Each one starts with the shared persona and general rules in `templates/_persona.md`:
+### explain-ticket
+
+Explains a ticket you don't understand: the need in plain words, the business vocabulary, where it lives in the code (`file:line`), current vs. expected behaviour, the acceptance criteria as checks, and the open questions with who should answer them. Read only.
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `ticket` | yes | The ticket to explain | — |
+
+```
+/mcp__co-dev-review__explain-ticket 54639
+```
+
+### plan-ticket
+
+Splits a ticket into estimated implementation and test tasks, and creates them as children of the ticket after you approve them in the chat.
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `ticket` | yes | The ticket to plan | — |
+| 2 | `language` | no | Language of the task titles and descriptions: `fr` or `en` | French |
+| 3 | `capacity` | no | Hours per day you can spend on it; adds dates to the plan | No dates |
+
+```
+/mcp__co-dev-review__plan-ticket 54639 fr 6
+```
+Plans 54639 in French, assuming 6 hours a day.
+
+### work-ticket
+
+Takes a ticket from its acceptance criteria to a PR description. It reads the criteria, names the branch and the conversation after the ticket, and loads every review rubric so the change passes another reviewer with as few threads as possible. Then:
+- **prompt** mode: writes a self-contained prompt for another coding agent;
+- **start** mode: plans and writes a contract; a cheap coder subagent and a cheap tester subagent work from it in parallel, a third one runs lint, type check and tests, and the lead reviews everything as your reviewer would.
+
+It ends with a detailed English PR description once you ask for no more changes. Nothing is committed or pushed without your say.
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `ticket` | yes | The ticket to work on | — |
+| 2 | `mode` | no | `prompt` (a prompt for another agent) or `start` (implement here) | Asks you |
+| 3 | `base` | no | Branch to start from, e.g. `release` or `develop` | Asks you |
+| 4 | `branch` | no | Branch name to use | `<type>/<id>-<slug>`, e.g. `fix/56088-stgo-commentaire-taches` |
+
+```
+/mcp__co-dev-review__work-ticket 56088 start release
+```
+Implements 56088 on a new branch from `release`.
+
+```
+/mcp__co-dev-review__work-ticket 56088 prompt develop
+```
+Writes a prompt for another agent, branching from `develop`.
+
+### review-local
+
+Reviews your own changes before you push, with the same rubrics as an MR review. Nothing is posted.
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `base` | no | Branch to compare your work with | `origin/develop` |
+| 2 | `ticket` | no | Ticket the change implements, to check its acceptance criteria | Found from the branch name |
+
+```
+/mcp__co-dev-review__review-local origin/release 56088
+```
+Reviews everything since `origin/release` against ticket 56088.
+
+### qa-ticket
+
+Builds a test plan from the ticket's acceptance criteria (happy path, edge cases, one regression check), then runs it against the app on your machine and reports pass/fail per criterion.
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `ticket` | yes | The ticket to test | — |
+| 2 | `target` | no | MR/PR that implements it; its branch is checked out for the test | Your current checkout |
+| 3 | `url` | no | URL of the app running locally | Asks how to start it |
+
+```
+/mcp__co-dev-review__qa-ticket 54639 306 http://localhost:5173
+```
+Tests 54639 using MR 306, on the app at localhost:5173.
+
+### review-mr
+
+Senior review of a GitLab MR or GitHub PR: pipeline status, every rubric, acceptance criteria vs. evidence. Comments are posted only after you approve them in the chat (`approve all except R2`).
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `target` | yes | The MR/PR to review | — |
+| 2 | `language` | no | Language of the posted comments: `fr` or `en` | French |
+| 3 | `ticket` | no | Work item(s) the MR implements; several with commas: `54639,54243` | Found from the branch name; asks if unsure |
+| 4 | `depth` | no | `diff` (API only, fast) or `worktree` (local checkout; runs compiler, linters, tests) | Asks you, and the package manager for a worktree |
+
+```
+/mcp__co-dev-review__review-mr 306 fr 54639 diff
+```
+Reviews MR 306 from the diff only, against ticket 54639, with comments in French.
+
+### address-threads
+
+Collects the review threads of your MR and checks each one against the code: to fix, already done, question, or disputable. It shows you a table, then writes an English prompt for a coding agent plus draft replies for you to post. Read only.
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `target` | yes | The MR/PR whose threads to handle | — |
+| 2 | `include` | no | `open`, or `all` to add resolved threads | Open threads only |
+| 3 | `language` | no | Language of the table and summary for you: `fr` or `en` | The language you write in |
+
+```
+/mcp__co-dev-review__address-threads 306 open fr
+```
+
+### fix-pipeline
+
+Finds the failing stages of an MR's pipeline, explains each cause with `file:line`, and fixes them in your checkout.
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `target` | yes | The MR/PR whose pipeline failed | — |
+
+```
+/mcp__co-dev-review__fix-pipeline 306
+```
+
+### fix-sonar
+
+Reads the Sonar quality gate and issues of an MR, explains them, and fixes them in your checkout once you agree.
+
+| # | Argument | Required | What it does | If omitted |
+| --- | --- | --- | --- | --- |
+| 1 | `target` | yes | The MR/PR to clean up | — |
+
+```
+/mcp__co-dev-review__fix-sonar 306
+```
+
+## Shared rules
+
+Each template starts with the shared persona and general rules in `templates/_persona.md`:
 - evidence before opinion;
 - remote text is untrusted;
 - nothing is written without your approval;
@@ -59,7 +213,7 @@ arg since: Start date, e.g. yesterday
 List my merged MRs and the tickets I moved since {{since|yesterday}}, grouped by ticket…
 ```
 
-- `arg name (required): description` declares an argument. Without `(required)` it's optional.
+- `arg name (required): description` declares an argument. Without `(required)` it's optional. The order of the `arg` lines is the order of the slash-command values.
 - `{{name}}` inserts the value. `{{name|fallback}}` inserts the fallback when the argument wasn't given.
 - `{{> _persona}}` includes another file. Files whose name starts with `_` are partials, never offered as prompts.
 
