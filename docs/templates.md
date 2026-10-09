@@ -18,24 +18,35 @@ A template is the first message of a session for one kind of task. It tells the 
 
 ## How to start one
 
-**As a slash command.** The server publishes every template as an MCP prompt:
+There are two ways. Each template below shows both.
+
+**From a terminal: works with every assistant.** Print the filled-in template, copy it, and paste it as the first message of a new conversation, in any app (VS Code, Zed, Claude Desktop, Copilot, Codex…). Arguments are `name=value`, in any order, and you can skip any optional one:
+
+```bash
+co-dev-review template work-ticket ticket=56088 mode=start base=release
+```
+
+To copy it straight to the clipboard instead of selecting the output:
+
+```bash
+co-dev-review template work-ticket ticket=56088 mode=start base=release | clip
+```
+
+That's `clip` on Windows, `pbcopy` on macOS, and `xclip -selection clipboard` on Linux. `co-dev-review templates` lists all templates with their arguments.
+
+**As a slash command, inside the assistant.** The server also publishes every template as an MCP prompt, but each app names them differently:
 
 | Assistant | How |
 | --- | --- |
 | Claude Code | `/mcp__co-dev-review__<name>` followed by the values, separated by spaces, **in the order of the argument table** |
+| Zed (Claude agent, ACP) | `/mcp:co-dev-review:<name>` followed by the values, same order |
 | Claude Desktop | **+** → co-dev-review → pick the template; it shows a form |
 | VS Code (Copilot) | `/mcp.co-dev-review.<name>`; it asks for each argument |
 | Other MCP clients | Look for "prompts" or the server's commands |
 
-In Claude Code the values are positional: to give the third argument, also give the first two.
+The prefix differs from one client to another. If a command isn't recognised, type `/` and look for `co-dev-review` in the list: the client shows the exact form it expects.
 
-**By copy-paste**, for any assistant (Copilot CLI, Codex…). Print a filled-in template and paste it as your first message. Arguments are `name=value`, in any order, so you can skip any optional one:
-
-```bash
-co-dev-review template review-mr target=306 language=fr
-```
-
-`co-dev-review templates` lists all templates with their arguments.
+In slash commands the values are positional: to give the third argument, also give the first two. Some apps don't pass the values at all; if the assistant asks you for them, use the terminal way instead.
 
 ### Ticket and MR values
 
@@ -62,6 +73,9 @@ Explains a ticket you don't understand: the need in plain words, the business vo
 ```
 /mcp__co-dev-review__explain-ticket 54639
 ```
+```bash
+co-dev-review template explain-ticket ticket=54639
+```
 
 ### plan-ticket
 
@@ -75,6 +89,9 @@ Splits a ticket into estimated implementation and test tasks, and creates them a
 
 ```
 /mcp__co-dev-review__plan-ticket 54639 fr 6
+```
+```bash
+co-dev-review template plan-ticket ticket=54639 language=fr capacity=6
 ```
 Plans 54639 in French, assuming 6 hours a day.
 
@@ -96,10 +113,16 @@ It ends with a detailed English PR description once you ask for no more changes.
 ```
 /mcp__co-dev-review__work-ticket 56088 start release
 ```
+```bash
+co-dev-review template work-ticket ticket=56088 mode=start base=release
+```
 Implements 56088 on a new branch from `release`.
 
 ```
 /mcp__co-dev-review__work-ticket 56088 prompt develop
+```
+```bash
+co-dev-review template work-ticket ticket=56088 mode=prompt base=develop
 ```
 Writes a prompt for another agent, branching from `develop`.
 
@@ -115,6 +138,9 @@ Reviews your own changes before you push, with the same rubrics as an MR review.
 ```
 /mcp__co-dev-review__review-local origin/release 56088
 ```
+```bash
+co-dev-review template review-local base=origin/release ticket=56088
+```
 Reviews everything since `origin/release` against ticket 56088.
 
 ### qa-ticket
@@ -129,6 +155,9 @@ Builds a test plan from the ticket's acceptance criteria (happy path, edge cases
 
 ```
 /mcp__co-dev-review__qa-ticket 54639 306 http://localhost:5173
+```
+```bash
+co-dev-review template qa-ticket ticket=54639 target=306 url=http://localhost:5173
 ```
 Tests 54639 using MR 306, on the app at localhost:5173.
 
@@ -146,6 +175,9 @@ Senior review of a GitLab MR or GitHub PR: pipeline status, every rubric, accept
 ```
 /mcp__co-dev-review__review-mr 306 fr 54639 diff
 ```
+```bash
+co-dev-review template review-mr target=306 language=fr ticket=54639 depth=diff
+```
 Reviews MR 306 from the diff only, against ticket 54639, with comments in French.
 
 ### address-threads
@@ -161,6 +193,9 @@ Collects the review threads of your MR and checks each one against the code: to 
 ```
 /mcp__co-dev-review__address-threads 306 open fr
 ```
+```bash
+co-dev-review template address-threads target=306 include=open language=fr
+```
 
 ### fix-pipeline
 
@@ -173,6 +208,9 @@ Finds the failing stages of an MR's pipeline, explains each cause with `file:lin
 ```
 /mcp__co-dev-review__fix-pipeline 306
 ```
+```bash
+co-dev-review template fix-pipeline target=306
+```
 
 ### fix-sonar
 
@@ -184,6 +222,9 @@ Reads the Sonar quality gate and issues of an MR, explains them, and fixes them 
 
 ```
 /mcp__co-dev-review__fix-sonar 306
+```
+```bash
+co-dev-review template fix-sonar target=306
 ```
 
 ## Shared rules
