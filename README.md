@@ -76,7 +76,7 @@ Each task has a ready-made opening message: who the assistant is, its rules, the
 co-dev-review template explain-ticket ticket=PROJ-123
 ```
 
-The templates: `review-mr`, `address-threads`, `review-local`, `plan-ticket`, `explain-ticket`, `qa-ticket`, `fix-sonar` and `fix-pipeline`. You can override them or add your own: see [Templates](docs/templates.md).
+The templates: `review-mr`, `address-threads`, `review-local`, `plan-ticket`, `explain-ticket`, `qa-ticket`, `fix-sonar`, `fix-pipeline` and `work-ticket`. You can override them or add your own: see [Templates](docs/templates.md).
 
 ### Approving what gets posted
 

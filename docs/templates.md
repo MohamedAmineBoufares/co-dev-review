@@ -28,6 +28,7 @@ co-dev-review template review-mr target=306 language=fr
 | `review-local` | Review your own branch before pushing; nothing is posted | `base?`, `ticket?` |
 | `plan-ticket` | Split a ticket into estimated tasks and create them after approval | `ticket`, `language?`, `capacity?` |
 | `address-threads` | Pull the open review threads of an MR, check each against the code, and get a ready-to-paste prompt for an agent to address them | `target`, `include?`, `language?` |
+| `work-ticket` | Start a ticket: pull its acceptance criteria, name the branch and conversation after it, then write a prompt for a coding agent or implement it to review-ready quality (tests, self-review against every rubric), and finish with a detailed PR description | `ticket`, `mode?`, `base?`, `branch?` |
 | `explain-ticket` | Understand a ticket: the need, the vocabulary, where it lives in the code, the open questions | `ticket` |
 | `qa-ticket` | Build a test plan from the acceptance criteria and run it locally | `ticket`, `target?`, `url?` |
 | `fix-sonar` | Triage the Sonar gate and issues of an MR, then fix them | `target` |

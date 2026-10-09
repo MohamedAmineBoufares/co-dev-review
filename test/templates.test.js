@@ -30,7 +30,7 @@ test('rendering includes the persona, fills values, falls back, and requires req
 test('every packaged template is well formed', () => {
   const templates = loadTemplates([packaged]);
   const names = [...templates.values()].filter(t => !t.partial).map(t => t.name).sort();
-  assert.deepEqual(names, ['address-threads', 'explain-ticket', 'fix-pipeline', 'fix-sonar', 'plan-ticket', 'qa-ticket', 'review-local', 'review-mr']);
+  assert.deepEqual(names, ['address-threads', 'explain-ticket', 'fix-pipeline', 'fix-sonar', 'plan-ticket', 'qa-ticket', 'review-local', 'review-mr', 'work-ticket']);
   for (const t of templates.values()) assert.deepEqual(lintTemplate(templates, t), [], t.name);
 });
 
