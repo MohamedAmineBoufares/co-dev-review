@@ -104,6 +104,8 @@ Without a sentence like this, the assistant has no reason to run anything.
 
 An argument marked **no** in the Required column can be left out; the "If omitted" column says what happens then.
 
+Under each argument table, a second table gives the command for every environment. Slash commands take the values in the order of the argument table. Environments that don't list co-dev-review prompts (the Copilot CLI/app, Codex, Antigravity) use the [plain text](#plain-text-ask-the-assistant-to-run-the-cli) way: a sentence telling the assistant to run the CLI. The **Terminal** row works everywhere: run it, then paste the output as the first message.
+
 ### explain-ticket
 
 Explains a ticket you don't understand: the need in plain words, the business vocabulary, where it lives in the code (`file:line`), current vs. expected behaviour, the acceptance criteria as checks, and the open questions with who should answer them. Read only.
@@ -112,12 +114,16 @@ Explains a ticket you don't understand: the need in plain words, the business vo
 | --- | --- | --- | --- | --- |
 | 1 | `ticket` | yes | The ticket to explain | — |
 
-```
-/mcp__co-dev-review__explain-ticket 54639
-```
-```bash
-co-dev-review template explain-ticket ticket=54639
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__explain-ticket 54639` |
+| Claude Desktop | **+** → co-dev-review → `explain-ticket`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.explain-ticket` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template explain-ticket ticket=54639 and follow it` |
+| Zed | `/mcp:co-dev-review:explain-ticket 54639` |
+| Codex | `Run co-dev-review template explain-ticket ticket=54639 and follow it` |
+| Antigravity | `Run co-dev-review template explain-ticket ticket=54639 and follow it` |
+| Terminal (any) | `co-dev-review template explain-ticket ticket=54639` |
 
 ### plan-ticket
 
@@ -129,12 +135,17 @@ Splits a ticket into estimated implementation and test tasks, and creates them a
 | 2 | `language` | no | Language of the task titles and descriptions: `fr` or `en` | French |
 | 3 | `capacity` | no | Hours per day you can spend on it; adds dates to the plan | No dates |
 
-```
-/mcp__co-dev-review__plan-ticket 54639 fr 6
-```
-```bash
-co-dev-review template plan-ticket ticket=54639 language=fr capacity=6
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__plan-ticket 54639 fr 6` |
+| Claude Desktop | **+** → co-dev-review → `plan-ticket`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.plan-ticket` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template plan-ticket ticket=54639 language=fr capacity=6 and follow it` |
+| Zed | `/mcp:co-dev-review:plan-ticket 54639 fr 6` |
+| Codex | `Run co-dev-review template plan-ticket ticket=54639 language=fr capacity=6 and follow it` |
+| Antigravity | `Run co-dev-review template plan-ticket ticket=54639 language=fr capacity=6 and follow it` |
+| Terminal (any) | `co-dev-review template plan-ticket ticket=54639 language=fr capacity=6` |
+
 Plans 54639 in French, assuming 6 hours a day.
 
 ### work-ticket
@@ -152,20 +163,32 @@ It ends with a detailed English PR description once you ask for no more changes.
 | 3 | `base` | no | Branch to start from, e.g. `release` or `develop` | Asks you |
 | 4 | `branch` | no | Branch name to use | `<type>/<id>-<slug>`, e.g. `fix/56088-stgo-commentaire-taches` |
 
-```
-/mcp__co-dev-review__work-ticket 56088 start release
-```
-```bash
-co-dev-review template work-ticket ticket=56088 mode=start base=release
-```
-Implements 56088 on a new branch from `release`.
+Implement 56088 on a new branch from `release`:
 
-```
-/mcp__co-dev-review__work-ticket 56088 prompt develop
-```
-```bash
-co-dev-review template work-ticket ticket=56088 mode=prompt base=develop
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__work-ticket 56088 start release` |
+| Claude Desktop | **+** → co-dev-review → `work-ticket`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.work-ticket` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template work-ticket ticket=56088 mode=start base=release and follow it` |
+| Zed | `/mcp:co-dev-review:work-ticket 56088 start release` |
+| Codex | `Run co-dev-review template work-ticket ticket=56088 mode=start base=release and follow it` |
+| Antigravity | `Run co-dev-review template work-ticket ticket=56088 mode=start base=release and follow it` |
+| Terminal (any) | `co-dev-review template work-ticket ticket=56088 mode=start base=release` |
+
+Write a prompt for another agent, branching from `develop`:
+
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__work-ticket 56088 prompt develop` |
+| Claude Desktop | **+** → co-dev-review → `work-ticket`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.work-ticket` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template work-ticket ticket=56088 mode=prompt base=develop and follow it` |
+| Zed | `/mcp:co-dev-review:work-ticket 56088 prompt develop` |
+| Codex | `Run co-dev-review template work-ticket ticket=56088 mode=prompt base=develop and follow it` |
+| Antigravity | `Run co-dev-review template work-ticket ticket=56088 mode=prompt base=develop and follow it` |
+| Terminal (any) | `co-dev-review template work-ticket ticket=56088 mode=prompt base=develop` |
+
 Writes a prompt for another agent, branching from `develop`.
 
 ### review-local
@@ -177,12 +200,17 @@ Reviews your own changes before you push, with the same rubrics as an MR review.
 | 1 | `base` | no | Branch to compare your work with | `origin/develop` |
 | 2 | `ticket` | no | Ticket the change implements, to check its acceptance criteria | Found from the branch name |
 
-```
-/mcp__co-dev-review__review-local origin/release 56088
-```
-```bash
-co-dev-review template review-local base=origin/release ticket=56088
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__review-local origin/release 56088` |
+| Claude Desktop | **+** → co-dev-review → `review-local`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.review-local` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template review-local base=origin/release ticket=56088 and follow it` |
+| Zed | `/mcp:co-dev-review:review-local origin/release 56088` |
+| Codex | `Run co-dev-review template review-local base=origin/release ticket=56088 and follow it` |
+| Antigravity | `Run co-dev-review template review-local base=origin/release ticket=56088 and follow it` |
+| Terminal (any) | `co-dev-review template review-local base=origin/release ticket=56088` |
+
 Reviews everything since `origin/release` against ticket 56088.
 
 ### qa-ticket
@@ -195,12 +223,17 @@ Builds a test plan from the ticket's acceptance criteria (happy path, edge cases
 | 2 | `target` | no | MR/PR that implements it; its branch is checked out for the test | Your current checkout |
 | 3 | `url` | no | URL of the app running locally | Asks how to start it |
 
-```
-/mcp__co-dev-review__qa-ticket 54639 306 http://localhost:5173
-```
-```bash
-co-dev-review template qa-ticket ticket=54639 target=306 url=http://localhost:5173
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__qa-ticket 54639 306 http://localhost:5173` |
+| Claude Desktop | **+** → co-dev-review → `qa-ticket`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.qa-ticket` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template qa-ticket ticket=54639 target=306 url=http://localhost:5173 and follow it` |
+| Zed | `/mcp:co-dev-review:qa-ticket 54639 306 http://localhost:5173` |
+| Codex | `Run co-dev-review template qa-ticket ticket=54639 target=306 url=http://localhost:5173 and follow it` |
+| Antigravity | `Run co-dev-review template qa-ticket ticket=54639 target=306 url=http://localhost:5173 and follow it` |
+| Terminal (any) | `co-dev-review template qa-ticket ticket=54639 target=306 url=http://localhost:5173` |
+
 Tests 54639 using MR 306, on the app at localhost:5173.
 
 ### review-mr
@@ -214,12 +247,17 @@ Senior review of a GitLab MR or GitHub PR: pipeline status, every rubric, accept
 | 3 | `ticket` | no | Work item(s) the MR implements; several with commas: `54639,54243` | Found from the branch name; asks if unsure |
 | 4 | `depth` | no | `diff` (API only, fast) or `worktree` (local checkout; runs compiler, linters, tests) | Asks you, and the package manager for a worktree |
 
-```
-/mcp__co-dev-review__review-mr 306 fr 54639 diff
-```
-```bash
-co-dev-review template review-mr target=306 language=fr ticket=54639 depth=diff
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__review-mr 306 fr 54639 diff` |
+| Claude Desktop | **+** → co-dev-review → `review-mr`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.review-mr` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template review-mr target=306 language=fr ticket=54639 depth=diff and follow it` |
+| Zed | `/mcp:co-dev-review:review-mr 306 fr 54639 diff` |
+| Codex | `Run co-dev-review template review-mr target=306 language=fr ticket=54639 depth=diff and follow it` |
+| Antigravity | `Run co-dev-review template review-mr target=306 language=fr ticket=54639 depth=diff and follow it` |
+| Terminal (any) | `co-dev-review template review-mr target=306 language=fr ticket=54639 depth=diff` |
+
 Reviews MR 306 from the diff only, against ticket 54639, with comments in French.
 
 ### address-threads
@@ -232,12 +270,16 @@ Collects the review threads of your MR and checks each one against the code: to 
 | 2 | `include` | no | `open`, or `all` to add resolved threads | Open threads only |
 | 3 | `language` | no | Language of the table and summary for you: `fr` or `en` | The language you write in |
 
-```
-/mcp__co-dev-review__address-threads 306 open fr
-```
-```bash
-co-dev-review template address-threads target=306 include=open language=fr
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__address-threads 306 open fr` |
+| Claude Desktop | **+** → co-dev-review → `address-threads`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.address-threads` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template address-threads target=306 include=open language=fr and follow it` |
+| Zed | `/mcp:co-dev-review:address-threads 306 open fr` |
+| Codex | `Run co-dev-review template address-threads target=306 include=open language=fr and follow it` |
+| Antigravity | `Run co-dev-review template address-threads target=306 include=open language=fr and follow it` |
+| Terminal (any) | `co-dev-review template address-threads target=306 include=open language=fr` |
 
 ### fix-pipeline
 
@@ -247,12 +289,16 @@ Finds the failing stages of an MR's pipeline, explains each cause with `file:lin
 | --- | --- | --- | --- | --- |
 | 1 | `target` | yes | The MR/PR whose pipeline failed | — |
 
-```
-/mcp__co-dev-review__fix-pipeline 306
-```
-```bash
-co-dev-review template fix-pipeline target=306
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__fix-pipeline 306` |
+| Claude Desktop | **+** → co-dev-review → `fix-pipeline`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.fix-pipeline` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template fix-pipeline target=306 and follow it` |
+| Zed | `/mcp:co-dev-review:fix-pipeline 306` |
+| Codex | `Run co-dev-review template fix-pipeline target=306 and follow it` |
+| Antigravity | `Run co-dev-review template fix-pipeline target=306 and follow it` |
+| Terminal (any) | `co-dev-review template fix-pipeline target=306` |
 
 ### fix-sonar
 
@@ -262,12 +308,16 @@ Reads the Sonar quality gate and issues of an MR, explains them, and fixes them 
 | --- | --- | --- | --- | --- |
 | 1 | `target` | yes | The MR/PR to clean up | — |
 
-```
-/mcp__co-dev-review__fix-sonar 306
-```
-```bash
-co-dev-review template fix-sonar target=306
-```
+| Environment | Command |
+| --- | --- |
+| Claude Code | `/mcp__co-dev-review__fix-sonar 306` |
+| Claude Desktop | **+** → co-dev-review → `fix-sonar`, then fill in the form |
+| GitHub Copilot (VS Code) | `/mcp.co-dev-review.fix-sonar` |
+| GitHub Copilot (CLI / app) | `Run co-dev-review template fix-sonar target=306 and follow it` |
+| Zed | `/mcp:co-dev-review:fix-sonar 306` |
+| Codex | `Run co-dev-review template fix-sonar target=306 and follow it` |
+| Antigravity | `Run co-dev-review template fix-sonar target=306 and follow it` |
+| Terminal (any) | `co-dev-review template fix-sonar target=306` |
 
 ## Shared rules
 
