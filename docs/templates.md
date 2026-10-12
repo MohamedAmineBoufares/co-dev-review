@@ -18,7 +18,15 @@ A template is the first message of a session for one kind of task. It tells the 
 
 ## How to start one
 
-There are two ways. Each template below shows both.
+There are three ways. Each template below shows the first two.
+
+| Way | Use it when | Works in |
+| --- | --- | --- |
+| **Slash command** (MCP prompt) | Your assistant lists co-dev-review prompts when you type `/` | Claude Code, Zed, Claude Desktop, VS Code Copilot |
+| **Terminal + paste** | Your assistant has no prompt support, or the slash command ignores your values | Every assistant |
+| **Plain text** (ask the assistant to run the CLI) | Your assistant can run shell commands but has no prompt support | Copilot CLI / app, Codex, any agent with a shell |
+
+An MCP prompt is something *you* trigger; the assistant never picks one by itself. A line like `co-dev-review template ...` typed into the chat is just text: the assistant does not recognise it as a command. Either run it in a terminal yourself, or tell the assistant to run it (see [Plain text](#plain-text-ask-the-assistant-to-run-the-cli)).
 
 **From a terminal: works with every assistant.** Print the filled-in template, copy it, and paste it as the first message of a new conversation, in any app (VS Code, Zed, Claude Desktop, Copilot, Codex…). Arguments are `name=value`, in any order, and you can skip any optional one:
 
@@ -47,6 +55,40 @@ That's `clip` on Windows, `pbcopy` on macOS, and `xclip -selection clipboard` on
 The prefix differs from one client to another. If a command isn't recognised, type `/` and look for `co-dev-review` in the list: the client shows the exact form it expects.
 
 In slash commands the values are positional: to give the third argument, also give the first two. Some apps don't pass the values at all; if the assistant asks you for them, use the terminal way instead.
+
+The same template, `work-ticket` for ticket 56088 in `start` mode from `release`, in each client:
+
+```
+/mcp__co-dev-review__work-ticket 56088 start release      # Claude Code
+/mcp:co-dev-review:work-ticket 56088 start release        # Zed
+/mcp.co-dev-review.work-ticket                            # VS Code Copilot (asks for each value)
+```
+
+In Claude Desktop, click **+** → co-dev-review → `work-ticket` and fill in the form.
+
+### Plain text: ask the assistant to run the CLI
+
+Use this when the assistant shows no co-dev-review prompts but can run shell commands (Copilot CLI / app, Codex…). Write a normal sentence that names the command, so it is clearly something to execute, not text to discuss:
+
+```
+Run `co-dev-review template work-ticket ticket=56088 mode=start base=release`
+and follow the instructions it prints.
+```
+
+```
+Run co-dev-review template review-mr target=306 language=en depth=diff,
+then do that review.
+```
+
+The assistant runs the command, reads the template it prints, and works from it as if it were your first message. If `co-dev-review` is not on the PATH, give the full command your install uses (for example `node C:\path\to\co-dev-review\src\cli.js template ...`).
+
+Without a sentence like this, the assistant has no reason to run anything.
+
+### Which one should I use?
+
+- **Slash command**: shortest and best when your client supports it. Values are positional, so follow the order of the argument table, and to set the third value you must also give the first two.
+- **Terminal + paste**: the most reliable. Use `name=value` arguments in any order, and skip the optional ones. Prefer it when a slash command ignores your values.
+- **Plain text**: the fallback when you are in a chat that can run commands but cannot show prompts. It uses the same `name=value` form as the terminal.
 
 ### Ticket and MR values
 
