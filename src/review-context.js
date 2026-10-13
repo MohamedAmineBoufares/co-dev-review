@@ -3,7 +3,7 @@ import { suggestRubrics } from './rubrics.js';
 import { repoSkills } from './repo-skills.js';
 import { localHead } from './local.js';
 import { detectPackageManager } from './worktree.js';
-import { compactFile, compactDiscussions, compactTicket, compactComments, compactSonar, compactRule } from './compact.js';
+import { compactFile, compactDiscussions, compactTicket, compactComments, compactSonar, compactRule, findDesignLinks, withDesignLinks } from './compact.js';
 
 // Combine related reads without hiding partial failures or pagination.
 export async function sections(tasks) {
@@ -26,6 +26,7 @@ export async function reviewContext(providers, target, page = 1, worktrees) {
     review: metadata, page,
     changes: shaped(result.changes, data => data.map(compactFile)),
     discussions: shaped(result.discussions, compactDiscussions),
+    designLinks: findDesignLinks(review.description, result.discussions.data),
     hunks: ledger(files, (page - 1) * 100),
     nextPage: Object.values(result).some(x => x.data?.length === 100) ? page + 1 : null,
     incomplete: Object.values(result).some(x => x.error) || Boolean(files.some(x => x.too_large || x.collapsed || !(x.diff ?? x.patch))),
@@ -56,11 +57,11 @@ export async function reviewContext(providers, target, page = 1, worktrees) {
 export async function ticketContext(providers, id, continuationToken, { full = false } = {}) {
   const ticket = await providers.ticket(id);
   const discussion = await sections({ discussion: () => providers.ticketComments(id, continuationToken) });
-  return {
+  return withDesignLinks({
     ticket: full ? ticket : compactTicket(ticket),
     discussion: full ? discussion.discussion : shaped(discussion.discussion, compactComments),
-    note: 'Use discussion.data.continuationToken for more comments. Read relevant children (ticket.children) with this same step. full=true returns every raw field.',
-  };
+    note: 'Use discussion.data.continuationToken for more comments. Read relevant children (ticket.children) with this same step. full=true returns every raw field. designLinks lists Figma URLs found in the ticket: fetch them with a Figma tool if you have one.',
+  }, ticket, discussion.discussion.data);
 }
 
 function ticketRefs(query) {

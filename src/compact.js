@@ -24,6 +24,23 @@ export function htmlToText(html, limit = 20000) {
 export const clip = (text, limit) => (typeof text === 'string' && text.length > limit ? `${text.slice(0, limit - 1)}…` : text);
 const compactObject = object => Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined && value !== null && value !== '' && !(Array.isArray(value) && !value.length)));
 
+// Figma links sit in descriptions, comments and hyperlinks. Collect them from the raw payload (before
+// htmlToText drops hrefs) so the assistant can fetch them with a Figma MCP instead of missing them.
+const FIGMA_URL = /https?:\/\/(?:[\w-]+\.)?figma\.com\/[^\s"'<>\\)\]|]+/gi;
+export function findDesignLinks(...values) {
+  const links = new Set();
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    for (const match of text.matchAll(FIGMA_URL)) links.add(match[0].replace(/&amp;/gi, '&').replace(/[.,;:!]+$/, ''));
+  }
+  return [...links].slice(0, 20);
+}
+export const withDesignLinks = (result, ...extra) => {
+  const designLinks = findDesignLinks(...extra, result);
+  return designLinks.length ? { ...result, designLinks } : result;
+};
+
 // --- Merge/pull request diffs and discussions -------------------------------------------------
 
 export function compactFile(file) {

@@ -11,7 +11,7 @@ import { blastRadius } from './blast-radius.js';
 import { runTests } from './tests.js';
 import { pipelineReport } from './pipeline.js';
 import { loadTemplates, renderTemplate } from './templates.js';
-import { draftSummary, sliceLines } from './compact.js';
+import { draftSummary, sliceLines, withDesignLinks } from './compact.js';
 import { readSkills } from './repo-skills.js';
 import { record, summarize } from './trace.js';
 import { Worktrees, gitRefs } from './worktree.js';
@@ -207,7 +207,7 @@ tool('plan_ticket_tasks', 'request.step is one of: search, read, prepare, reques
   }
   if (r.step === 'read') {
     const ref = resolveTicket(config, r.ticketId, r.tracker);
-    return { tracker: ref.tracker, ...await service.trackers[ref.tracker].read(ref, r.continuationToken, { full: r.full }) };
+    return { tracker: ref.tracker, ...withDesignLinks(await service.trackers[ref.tracker].read(ref, r.continuationToken, { full: r.full })) };
   }
   if (r.step === 'prepare') {
     const { tracker: name } = resolveTicket(config, r.ticketId, r.tracker);

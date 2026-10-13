@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { htmlToText, compactFile, compactDiscussions, compactTicket, compactComments, compactSonar, compactRule, draftSummary, sliceLines } from '../src/compact.js';
+import { htmlToText, compactFile, compactDiscussions, compactTicket, compactComments, compactSonar, compactRule, draftSummary, sliceLines, findDesignLinks, withDesignLinks } from '../src/compact.js';
 import { summarizeTestReport } from '../src/tests.js';
+
+test('Figma links are found in raw HTML, text and nested payloads, deduplicated', () => {
+  const href = '<a href="https://www.figma.com/design/AbC123/App?node-id=1-2&amp;t=x">design</a>';
+  assert.deepEqual(findDesignLinks(href, { text: 'see https://figma.com/file/Q/Name. and https://www.figma.com/design/AbC123/App?node-id=1-2&t=x' }),
+    ['https://www.figma.com/design/AbC123/App?node-id=1-2&t=x', 'https://figma.com/file/Q/Name']);
+  assert.deepEqual(findDesignLinks(undefined, 'no link here'), []);
+  assert.deepEqual(withDesignLinks({ a: 1 }), { a: 1 });
+  assert.deepEqual(withDesignLinks({ a: 'https://figma.com/board/Z' }).designLinks, ['https://figma.com/board/Z']);
+});
 
 test('HTML becomes readable text: lists, breaks, entities, no markup', () => {
   assert.equal(htmlToText('<div style="x"><p>Given&nbsp;a <b>user</b></p><ul><li>one</li><li>two &amp; three</li></ul></div>'), 'Given a user\n\n- one\n- two & three');

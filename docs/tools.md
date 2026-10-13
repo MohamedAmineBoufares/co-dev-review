@@ -10,7 +10,7 @@ Reviews local changes before pushing, or a remote GitLab MR or GitHub PR, and pu
 
 | Step | Parameters | Returns |
 | --- | --- | --- |
-| `read` | `target?`, `page`, `mode` (`working`/`staged`/`branch`), `base` | Diff page (path, status, patch), existing discussions without system notes, hunk ledger and `nextPage`. Page 1 also returns the rubrics, repository skills, worktree status and `checkoutPlan` (policy, detected package manager, existing worktree), so the assistant can ask before checking out. Without a `target`, it reads the local checkout, paged by 100 files or about 200 KB |
+| `read` | `target?`, `page`, `mode` (`working`/`staged`/`branch`), `base` | Diff page (path, status, patch), existing discussions without system notes, `designLinks` (Figma URLs in the description and discussions), hunk ledger and `nextPage`. Page 1 also returns the rubrics, repository skills, worktree status and `checkoutPlan` (policy, detected package manager, existing worktree), so the assistant can ask before checking out. Without a `target`, it reads the local checkout, paged by 100 files or about 200 KB |
 | `read_file` | `target`, `path`, `ref`, `lines?` | A file at the reviewed head, from the review worktree when it is at that commit, otherwise from the API. `lines` (`"120-220"`, `"120-"`, `"-80"`) returns a range; without it, files over 1,500 lines are cut with a continuation hint |
 | `pipeline` | `target` | The MR/PR's latest pipeline (GitLab, including child pipelines) or check runs (GitHub): status, whether it ran on the review head, and for each failing required job its stage, cause (the meaningful log lines) and `file:line` locations, marked `inDiff` / `onChangedLine` |
 | `rubric` | `names` (≤ 8) | Full text of packaged or repository skills, for clients that cannot load skill files |
@@ -59,7 +59,7 @@ Turns a ticket into estimated child tasks, in Azure DevOps (child Tasks), Jira (
 | Step | Parameters | Returns |
 | --- | --- | --- |
 | `search` | `query` (WIQL, JQL or GitHub issue search) or `queryId` (Azure saved query, Jira filter), `tracker?` | Up to 200 tickets: id, title, type, state, assignee, tags, area, iteration |
-| `read` | `ticketId`, `continuationToken?`, `full?` | Reviewer-relevant fields with HTML converted to text (description, acceptance criteria, repro steps), parent, children, related items, linked pull requests and attachments, and the discussion. `full: true` returns the raw work item |
+| `read` | `ticketId`, `continuationToken?`, `full?` | Reviewer-relevant fields with HTML converted to text (description, acceptance criteria, repro steps), parent, children, related items, linked pull requests and attachments, `designLinks` (Figma URLs found in the ticket and its comments), and the discussion. `full: true` returns the raw work item |
 | `prepare` | `ticketId`, `language`, `tasks`, `approval?` | The saved draft, the total hours and the approval outcome |
 | `request_approval`, `approve`, `revise`, `view_draft`, `publish` | `draftId`… | As for reviews; task ids are `T1`, `T2`… |
 
