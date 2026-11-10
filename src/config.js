@@ -25,3 +25,8 @@ export function required(config, key) {
   if (!config[key]) throw new Error(`Missing configuration: ${key}`);
   return config[key];
 }
+// Every configured token value, wherever it appears in text the model or the trace will see.
+export function redactSecrets(config, text) {
+  for (const [key, value] of Object.entries(config)) if (key.includes('TOKEN') && value) text = text.replaceAll(value, '[REDACTED]');
+  return text;
+}

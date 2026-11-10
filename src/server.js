@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { loadConfig } from './config.js';
+import { loadConfig, redactSecrets } from './config.js';
 import { relaunchWithExtraCa } from './ca.js';
 import { Service } from './service.js';
 import { version, workflow } from './instructions.js';
@@ -41,7 +41,8 @@ const text = z.string().trim().min(1).max(30000);
 // errors never reach the handler or the trace, so the messages themselves must say how to fix the call.
 const stepUnion = variants => {
   const steps = variants.map(variant => variant.shape.step.value);
-  return z.discriminatedUnion('step', variants, {
+  // strict: an invented field name ("comments" for items) is reported instead of silently dropped.
+  return z.discriminatedUnion('step', variants.map(variant => variant.strict()), {
     errorMap: (issue, ctx) => issue.code === 'invalid_union_discriminator' ? { message: `step must be one of ${steps.join(', ')}. Start with step=${steps[0]}.` }
       : issue.code === 'invalid_type' && issue.received === 'undefined' ? { message: 'Wrap the arguments as { "request": { "step": "<step>", ... } }' }
       : { message: ctx.defaultError },
@@ -62,12 +63,12 @@ const coverage = z.array(z.object({
   hunks: z.string().trim().min(1).describe('Hunk ids from the read ledger: "7.2", a whole file as "7.*", a range as "7.2-7.5", or a comma-separated mix'),
   verdict: z.enum(['finding', 'reviewed-clean', 'not-applicable']),
   note: z.string().trim().max(500).optional().describe('Required in practice for not-applicable: say why the hunk needs no judgement'),
-})).min(1).describe('Every hunk in the diff needs exactly one verdict. The draft is rejected while any hunk is unaccounted for.');
+}), { required_error: 'coverage is required: one { hunks, verdict } claim per hunk id from the read ledger (hunks "7.*" covers a whole file), so that every hunk gets exactly one verdict' }).min(1).describe('Every hunk in the diff needs exactly one verdict. The draft is rejected while any hunk is unaccounted for.');
 const passEvidence = z.union([
   z.object({ runId: id.describe('runId returned by the step for this same target') }).strict(),
   z.object({ skipped: z.string().trim().min(20).max(500).describe('Why the pass could not be run; shown to the approver') }).strict(),
 ]);
-const deterministic = z.object({ checks: passEvidence, blastRadius: passEvidence, tests: passEvidence.optional().describe('runId of step=tests on this head, when tests were run') }).describe('Proof that step=checks and step=blast_radius ran on this review head against its base, or an explicit reason each was skipped. A run on another commit or base is rejected.');
+const deterministic = z.object({ checks: passEvidence, blastRadius: passEvidence, tests: passEvidence.optional().describe('runId of step=tests on this head, when tests were run') }, { required_error: 'deterministic is required: { checks: { runId }, blastRadius: { runId } } from step=verify (or steps checks and blast_radius) on this target, or { skipped: "<reason, 20+ characters>" } for a pass that could not run' }).describe('Proof that step=checks and step=blast_radius ran on this review head against its base, or an explicit reason each was skipped. A run on another commit or base is rejected.');
 
 const server = new McpServer({ name: 'co-dev-review', version }, { instructions: workflow });
 function tool(name, description, inputSchema, callback, readOnly = true) {
@@ -76,10 +77,10 @@ function tool(name, description, inputSchema, callback, readOnly = true) {
       const result = await callback(args);
       record(summarize(name, args, result));
       // Compact JSON: indentation alone is about a quarter of every response, paid in every client's context.
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      // Redacted as a whole: results carry error text as data too (sections, verify, read_file paths).
+      return { content: [{ type: 'text', text: redactSecrets(config, JSON.stringify(result)) }] };
     } catch (error) {
-      let message = error instanceof Error ? error.message : 'Operation failed';
-      for (const [key, value] of Object.entries(config)) if (key.includes('TOKEN') && value) message = message.replaceAll(value, '[REDACTED]');
+      const message = redactSecrets(config, error instanceof Error ? error.message : 'Operation failed');
       record(summarize(name, args, undefined, message));
       return { isError: true, content: [{ type: 'text', text: message }] };
     }
@@ -157,7 +158,7 @@ tool('review_work', 'request.step is one of: read, read_file, rubric, pipeline, 
     z.object({ step: z.literal('pipeline'), target }),
     z.object({ step: z.literal('tests'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD') }),
     z.object({ step: z.literal('verify'), target, packageManager: z.enum(packageManagers).default('auto').describe('As for step=checkout. Ask the user first unless checkoutPlan.policy is always'), install: z.boolean().default(true), tests: z.boolean().default(true).describe('Also run step=tests') }),
-    z.object({ step: z.literal('prepare_comments'), target, language, items: z.array(finding).min(1).max(100), coverage, rubricsApplied: z.array(z.string().trim().min(1).max(64)).max(20).describe('The skills you actually read and applied: copy read.rubrics.requiredSkills, minus anything listed in rubricsSkipped, plus the repoSkills you read, e.g. ["review-react-ts", "house-style"]'), rubricsSkipped: z.array(z.object({ name: z.string().trim().min(1).max(64), reason: z.string().trim().min(15).max(300) })).max(20).default([]).describe('Routed rubrics you deliberately did not apply, each with a reason the approver sees'), deterministic, approval: approvalChoice }),
+    z.object({ step: z.literal('prepare_comments'), target, language, items: z.array(finding, { required_error: 'items is required: the findings to post, each with body, severity, confidence and, for an inline comment, path plus lineText. For a clean review send one general comment (no path, severity suggestion, confidence confirmed) saying what was checked and found clean' }).min(1).max(100), coverage, rubricsApplied: z.array(z.string().trim().min(1).max(64), { required_error: 'rubricsApplied is required: copy read.rubrics.requiredSkills, minus anything listed in rubricsSkipped, plus the repoSkills you read' }).max(20).describe('The skills you actually read and applied: copy read.rubrics.requiredSkills, minus anything listed in rubricsSkipped, plus the repoSkills you read, e.g. ["review-react-ts", "house-style"]'), rubricsSkipped: z.array(z.object({ name: z.string().trim().min(1).max(64), reason: z.string().trim().min(15).max(300) })).max(20).default([]).describe('Routed rubrics you deliberately did not apply, each with a reason the approver sees'), deterministic, approval: approvalChoice }),
     ...savedSteps,
   ]),
 }, async ({ request: r }) => {

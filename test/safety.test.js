@@ -248,3 +248,15 @@ test('inline comments anchor on the text of the changed line, not a counted numb
   await assert.rejects(service.reviewDraft({ ...request, items: [{ body: 'r', severity: 'minor', path: 'new.js', lineText: 'const x = 1;', side: 'RIGHT' }] }), /appears on lines 2, 5/);
   await assert.rejects(service.reviewDraft({ ...request, items: [{ body: 'r', severity: 'minor', path: 'new.js', lineText: 'nowhere', side: 'RIGHT' }] }), /no added line reads "nowhere"/);
 });
+
+test('token values are redacted wherever they appear, including inside result data', async () => {
+  const { redactSecrets } = await import('../src/config.js');
+  const { summarize } = await import('../src/trace.js');
+  const config = { GITLAB_TOKEN: 'glpat-secret123', GITLAB_URL: 'https://gitlab.example.com', SONAR_TOKEN: '' };
+  const result = { checkout: { error: 'Remote "origin" of REVIEW_REPO_ROOT is https://oauth2:glpat-secret123@gitlab.example.com/g/r, not g/other' } };
+  assert.equal(redactSecrets(config, JSON.stringify(result)).includes('glpat-secret123'), false);
+  assert.match(redactSecrets(config, 'token glpat-secret123 here'), /token \[REDACTED\] here/);
+  assert.equal(redactSecrets(config, 'nothing to hide'), 'nothing to hide', 'an empty token value never matches');
+  const entry = summarize('review_work', { request: { step: 'verify', target: { provider: 'gitlab', number: 1 } } }, { ...result, pipeline: { error: 'x' }, deterministic: { checks: { skipped: 'checkout failed' } } });
+  assert.deepEqual([entry.install, entry.pipeline, entry.runs], ['error', 'error', { checks: 'skipped' }], 'the trace keeps statuses, never error text');
+});
