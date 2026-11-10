@@ -87,7 +87,7 @@ export class Store {
   async approved(draft) {
     let approval;
     try { approval = JSON.parse(await fs.readFile(this.file(draft.id, 'approval.json'), 'utf8')); }
-    catch { throw new Error('Not approved. Ask the user to run the local approval command and inspect every item.'); }
+    catch { throw new Error('Not approved. Use step=request_approval to show the preview and step=approve with the user\'s reply, or ask the user to run co-dev-review approve.'); }
     if (approval.hash !== digest(draft) || Date.parse(approval.expiresAt) < Date.now()) throw new Error('Approval is stale or content changed. Approve again.');
     return approval;
   }

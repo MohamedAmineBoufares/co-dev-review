@@ -44,10 +44,13 @@ export function summarize(tool, args, result, error) {
       const jobs = (p?.failedStages ?? []).flatMap(s => s.jobs);
       return { ...entry, status: p?.status, matchesHead: p?.matchesHead, failed: jobs.map(j => j.job), onChangedLines: jobs.reduce((n, j) => n + (j.locations ?? []).filter(l => l.onChangedLine).length, 0) };
     }
+    case 'verify':
+      return { ...entry, pipeline: result?.pipeline?.data?.pipeline?.status ?? result?.pipeline?.error, install: result?.checkout?.data?.install?.status ?? result?.checkout?.error,
+        runs: Object.fromEntries(Object.entries(result?.deterministic ?? {}).map(([pass, x]) => [pass, x.runId ? 'run' : 'skipped'])) };
     case 'tests':
       return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, projects: Object.fromEntries((result?.projects ?? []).map(p => [p.project, p.total !== undefined ? `${p.passed}/${p.total} passed` : p.status])) };
     case 'read_file':
-      return { ...entry, path: args.request.path, lines: args.request.lines };
+      return { ...entry, path: args.request.path ?? args.request.paths?.join(', '), lines: args.request.lines };
     case 'prepare_comments':
       return { ...entry, draft: result?.draft?.id, items: result?.draft?.items?.length,
         severities: Object.fromEntries(['blocker', 'major', 'minor', 'suggestion'].map(s => [s, result?.draft?.items?.filter(i => i.severity === s).length ?? 0]).filter(([, n]) => n)),

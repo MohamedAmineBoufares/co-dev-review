@@ -20,7 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { approveInChat, approveInBrowser, supportsForm, supportsUrl, renderPreview, approveFromConversation, reviseItem } from './approval.js';
 import { packageManagers } from './worktree.js';
 import { trackerNames, defaultTracker, resolveTicket } from './trackers.js';
-import { reviewContext, sonarReport } from './review-context.js';
+import { reviewContext, sonarReport, sections } from './review-context.js';
 
 const config = loadConfig();
 // Behind a TLS-intercepting proxy the real server is the child; this process only relays stdio.
@@ -33,8 +33,20 @@ const provider = z.enum(['gitlab', 'github']);
 const target = z.object({ provider, project: z.string().min(1).optional().describe('GitLab ID/path or GitHub owner/repository; defaults to configured GitLab project'), number: z.number().int().positive() });
 const page = z.number().int().min(1).max(1000).default(1);
 const language = z.enum(['fr', 'en']);
-const id = z.string().uuid();
+const id = z.string().uuid('A full 36-character id as the server returned it (draft.id or runId), not its 8-character prefix');
+const itemId = z.string().regex(/^[RT]\d{1,3}$/, 'Item ids look like R1 or T2, as shown in the preview. "all" is not an id: list every id the user approved');
+const lineRange = z.string().regex(/^\s*\d*\s*-?\s*\d*\s*$/, 'lines must look like "120-220", "120-" or "-80"');
 const text = z.string().trim().min(1).max(30000);
+// The SDK accepts only an object at the top level, so the step union sits under "request". Schema
+// errors never reach the handler or the trace, so the messages themselves must say how to fix the call.
+const stepUnion = variants => {
+  const steps = variants.map(variant => variant.shape.step.value);
+  return z.discriminatedUnion('step', variants, {
+    errorMap: (issue, ctx) => issue.code === 'invalid_union_discriminator' ? { message: `step must be one of ${steps.join(', ')}. Start with step=${steps[0]}.` }
+      : issue.code === 'invalid_type' && issue.received === 'undefined' ? { message: 'Wrap the arguments as { "request": { "step": "<step>", ... } }' }
+      : { message: ctx.defaultError },
+  }).describe('One workflow step and its arguments. Earlier steps return what later ones need: read gives hunk ids and requiredSkills, verify/checks/blast_radius/tests give runIds, prepare_comments and prepare give draftId.');
+};
 const finding = z.object({
   body: text.describe('Exact comment text in the selected language; include impact and actionable evidence'),
   severity: z.enum(['blocker', 'major', 'minor', 'suggestion']),
@@ -127,33 +139,41 @@ async function draftStep(kind, step, draftId, approval, extra = {}) {
 const savedSteps = [
   z.object({ step: z.literal('request_approval'), draftId: id, approval: approvalChoice }),
   z.object({ step: z.literal('approve'), draftId: id,
-    selectedIds: z.array(z.string().regex(/^[RT]\d{1,3}$/)).min(1).max(100).describe('Exactly the item ids the user approved in their reply, e.g. ["R1","R3"]'),
+    selectedIds: z.array(itemId).min(1).max(100).describe('Exactly the item ids the user approved in their reply, e.g. ["R1","R3"]'),
     userWords: z.string().trim().min(2).max(500).describe("The user's approving reply, quoted verbatim; it is stored with the approval"),
     publish: z.boolean().default(true).describe('false only when the user asked to approve without posting now') }),
-  z.object({ step: z.literal('revise'), draftId: id, itemId: z.string().regex(/^[RT]\d{1,3}$/), text: text.describe('The reworded comment (Markdown) or task description (Azure HTML) the user asked for') }),
+  z.object({ step: z.literal('revise'), draftId: id, itemId, text: text.describe('The reworded comment (Markdown) or task description (Azure HTML) the user asked for') }),
   z.object({ step: z.literal('view_draft'), draftId: id }),
   z.object({ step: z.literal('publish'), draftId: id }),
 ];
-tool('review_work', 'request.step is one of: read, read_file, rubric, pipeline, checkout, checks, blast_radius, tests, prepare_comments, request_approval, approve, revise, view_draft, publish. Review local changes before pushing or a GitLab MR/GitHub PR. Start with step=read; it returns the diff, a per-hunk ledger and the domain rubrics to load. step=rubric returns the full text of a rubric for clients that cannot load skill files. step=pipeline reports the failing CI stages of a remote MR/PR with their cause and file:line. step=checkout puts a remote MR/PR head in a dedicated worktree. step=checks runs the repository\'s own compiler and linters over the change; step=blast_radius lists call sites outside the diff; step=tests runs the unit tests related to the change. Each returns a runId; prepare_comments requires the first two. The assistant examines code, explains blockers and suggestions, and can prepare French/English comments. Publishing requires the user approval of the saved draft: by default you show its preview and relay their reply with step=approve. These steps support one review; they are not separate tools.', {
-  request: z.discriminatedUnion('step', [
+tool('review_work', 'request.step is one of: read, read_file, rubric, pipeline, checkout, checks, blast_radius, tests, verify, prepare_comments, request_approval, approve, revise, view_draft, publish. Review local changes before pushing or a GitLab MR/GitHub PR. Start with step=read; it returns the diff, a per-hunk ledger and the domain rubrics to load. step=rubric returns the full text of a rubric for clients that cannot load skill files. step=pipeline reports the failing CI stages of a remote MR/PR with their cause and file:line. step=checkout puts a remote MR/PR head in a dedicated worktree. step=checks runs the repository\'s own compiler and linters over the change; step=blast_radius lists call sites outside the diff; step=tests runs the unit tests related to the change. Each returns a runId; prepare_comments requires the first two. step=verify runs pipeline, checkout, checks, blast_radius and tests in one call for a remote MR/PR and returns a ready deterministic object. The assistant examines code, explains blockers and suggestions, and can prepare French/English comments. Publishing requires the user approval of the saved draft: by default you show its preview and relay their reply with step=approve. These steps support one review; they are not separate tools.', {
+  request: stepUnion([
     z.object({ step: z.literal('read'), target: target.optional().describe('Remote MR/PR; omit to review the configured local checkout'), page, mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD').describe('For local branch review use the intended comparison ref, e.g. origin/develop') }),
-    z.object({ step: z.literal('read_file'), target, path: z.string().min(1), ref: z.string().min(1).describe('Head SHA from the reviewed snapshot'), lines: z.string().regex(/^\s*\d*\s*-?\s*\d*\s*$/).optional().describe('Line range such as "120-220", "120-" or "-80"; read only what you need. Without it, files longer than 1500 lines are cut with a continuation hint') }),
+    z.object({ step: z.literal('read_file'), target: target.describe('Remote MR/PR. A local review has no read_file: open files with the host\'s own file tools'), path: z.string().min(1).optional().describe('One repository-relative path from the diff'), paths: z.array(z.string().min(1)).min(1).max(20).optional().describe('Several paths in one call, e.g. the callers to read before refuting a finding; one failing path does not fail the others'), ref: z.string().min(1).describe('review.head from step=read'), lines: lineRange.optional().describe('Line range such as "120-220", "120-" or "-80", applied to every requested file; read only what you need. Without it, files longer than 1500 lines are cut with a continuation hint') }),
     z.object({ step: z.literal('rubric'), names: z.array(z.string().min(1).max(64)).min(1).max(8).describe('Rubric or repository skill names from the read result, e.g. ["review-react-ts", "house-style"]') }),
     z.object({ step: z.literal('checkout'), target, packageManager: z.enum(packageManagers).default('auto').describe('auto links your checkout\'s node_modules when the change touches no lockfile or package.json, else installs with the lockfile\'s manager; link, pnpm, npm or yarn force one; none skips dependencies. Ask the user first'), install: z.boolean().default(true).describe('Install dependencies from the lockfile (lifecycle scripts skipped) when node_modules is missing or the lockfile changed') }),
     z.object({ step: z.literal('checks'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD'), only: z.array(z.enum(runnerNames)).optional().describe('Restrict which runners execute; omit to run every one that is available'), detail: z.enum(['summary', 'full']).default('summary').describe('summary keeps results short; full returns every finding or caller') }),
     z.object({ step: z.literal('blast_radius'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD'), detail: z.enum(['summary', 'full']).default('summary').describe('summary keeps results short; full returns every finding or caller'), symbols: z.array(z.string().min(1).max(64)).max(10).optional().describe('Expand every caller of these symbols only') }),
     z.object({ step: z.literal('pipeline'), target }),
     z.object({ step: z.literal('tests'), target: target.optional().describe('Remote MR/PR prepared with step=checkout; runs in its worktree against the review base, ignoring mode and base'), mode: z.enum(['working', 'staged', 'branch']).default('working'), base: z.string().default('HEAD') }),
-    z.object({ step: z.literal('prepare_comments'), target, language, items: z.array(finding).min(1).max(100), coverage, rubricsApplied: z.array(z.string().trim().min(1).max(64)).max(20).describe('Names of the rubric skills and repository skills you actually read and applied for this review, e.g. ["review-react-ts", "house-style"]. Every rubric skill routed by read must be here or in rubricsSkipped.'), rubricsSkipped: z.array(z.object({ name: z.string().trim().min(1).max(64), reason: z.string().trim().min(15).max(300) })).max(20).default([]).describe('Routed rubrics you deliberately did not apply, each with a reason the approver sees'), deterministic, approval: approvalChoice }),
+    z.object({ step: z.literal('verify'), target, packageManager: z.enum(packageManagers).default('auto').describe('As for step=checkout. Ask the user first unless checkoutPlan.policy is always'), install: z.boolean().default(true), tests: z.boolean().default(true).describe('Also run step=tests') }),
+    z.object({ step: z.literal('prepare_comments'), target, language, items: z.array(finding).min(1).max(100), coverage, rubricsApplied: z.array(z.string().trim().min(1).max(64)).max(20).describe('The skills you actually read and applied: copy read.rubrics.requiredSkills, minus anything listed in rubricsSkipped, plus the repoSkills you read, e.g. ["review-react-ts", "house-style"]'), rubricsSkipped: z.array(z.object({ name: z.string().trim().min(1).max(64), reason: z.string().trim().min(15).max(300) })).max(20).default([]).describe('Routed rubrics you deliberately did not apply, each with a reason the approver sees'), deterministic, approval: approvalChoice }),
     ...savedSteps,
   ]),
 }, async ({ request: r }) => {
   if (r.step === 'read') return r.target ? reviewContext(service.providers, r.target, r.page, worktrees) : localDiff(config, r);
-  if (r.step === 'read_file') return sliceLines(await worktrees.source(r.target, r.path, r.ref) ?? await service.providers.source(r.target, r.path, r.ref), r.lines);
+  if (r.step === 'read_file') {
+    if (!r.path && !r.paths) throw new Error('Give path for one file or paths for up to 20');
+    const read = async file => sliceLines(await worktrees.source(r.target, file, r.ref) ?? await service.providers.source(r.target, file, r.ref), r.lines);
+    if (!r.paths) return read(r.path);
+    const results = await Promise.allSettled(r.paths.map(read));
+    return { files: results.map((x, i) => (x.status === 'fulfilled' ? x.value : { file: r.paths[i], error: x.reason.message })) };
+  }
   if (r.step === 'rubric') return readSkills(config, r.names);
   if (r.step === 'pipeline') return pipelineReport(service.providers, r.target);
   if (r.step === 'checkout') return worktrees.prepare(service.providers, r.target, { install: r.install, packageManager: r.packageManager });
   if (r.step === 'checks' || r.step === 'blast_radius' || r.step === 'tests') return deterministicPass(r);
+  if (r.step === 'verify') return verify(r);
   if (r.step === 'prepare_comments') { const draft = await service.reviewDraft(r); return preview(draft, await requestApproval(draft, r.approval)); }
   return draftStep('review', r.step, r.draftId, r.approval, r);
 }, false);
@@ -175,6 +195,22 @@ async function deterministicPass(r) {
     evidence: r.target ? `Pass this runId as deterministic.${r.step === 'blast_radius' ? 'blastRadius' : r.step}.runId in prepare_comments.` : 'Local run: valid as prepare_comments evidence only if this checkout is at the review head and base resolves to the review base. For a remote review use step=checkout and pass the target.' };
 }
 
+// Five sequential calls became the slowest part of a remote review. One call runs pipeline and checkout
+// together, then the three passes in the worktree, and hands back the deterministic object as prepare_comments wants it.
+async function verify(r) {
+  const first = await sections({
+    pipeline: () => pipelineReport(service.providers, r.target),
+    checkout: () => worktrees.prepare(service.providers, r.target, { install: r.install, packageManager: r.packageManager }),
+  });
+  const fields = { checks: 'checks', blastRadius: 'blast_radius', ...(r.tests ? { tests: 'tests' } : {}) };
+  const passes = first.checkout.error
+    ? Object.fromEntries(Object.keys(fields).map(field => [field, { error: `checkout failed: ${first.checkout.error}` }]))
+    : await sections(Object.fromEntries(Object.entries(fields).map(([field, step]) => [field, () => deterministicPass({ step, target: r.target })])));
+  const deterministic = Object.fromEntries(Object.entries(passes).map(([field, x]) => [field, x.data ? { runId: x.data.runId } : { skipped: `step=${fields[field]} could not run: ${x.error}`.slice(0, 500) }]));
+  return { ...first, ...passes, deterministic,
+    note: 'Pass deterministic to prepare_comments as returned. Triage every checks finding on a changed line, check the blast-radius callers for each changed contract, and quote failing tests. A pass with an error proves nothing about the code; its skip reason is shown to the approver.' };
+}
+
 const plannedTask = z.object({
   title: z.string().trim().min(1).max(255),
   description: text.describe("Final task description in the tracker's format (Azure DevOps HTML, Jira wiki markup, GitHub Markdown): scope, completion criteria, dependencies and estimate assumptions"),
@@ -183,11 +219,11 @@ const plannedTask = z.object({
 });
 const ticketRef = z.union([
   z.number().int().positive(),
-  z.string().trim().regex(/^(?:[A-Za-z][A-Za-z0-9_]+-\d+|(?:[\w.-]+\/[\w.-]+)?#\d+|\d+)$/),
+  z.string().trim().regex(/^(?:[A-Za-z][A-Za-z0-9_]+-\d+|(?:[\w.-]+\/[\w.-]+)?#\d+|\d+)$/, 'Ticket ids look like 42 (Azure), PROJ-123 (Jira) or owner/repo#45 (GitHub)'),
 ]).describe('Azure work item id (42), Jira key (PROJ-123) or GitHub issue (owner/repo#45, or #45 with GITHUB_REPO)');
 const trackerChoice = z.enum(trackerNames).optional().describe(`Ticket tracker; inferred from the id, else ${defaultTracker(config)} (TICKET_TRACKER)`);
 tool('plan_ticket_tasks', 'request.step is one of: search, read, prepare, request_approval, approve, revise, view_draft, publish. Works with Azure DevOps, Jira and GitHub Issues. Turn a ticket into clear implementation and testing tasks with estimated hours, created under it after approval (Azure child Tasks, Jira sub-tasks, GitHub sub-issues). Use step=search to find tickets: WIQL or a saved query id for Azure, JQL or a filter id for Jira, a search query for GitHub. step=read returns the ticket, its children and discussion. step=prepare saves the plan for approval.', {
-  request: z.discriminatedUnion('step', [
+  request: stepUnion([
     z.object({
       step: z.literal('search'), tracker: trackerChoice,
       query: z.string().trim().min(1).max(4000).optional().describe('Azure: WIQL (supports @project, @Me). Jira: JQL, e.g. "assignee = currentUser() AND statusCategory != Done". GitHub: issue search, e.g. "is:open assignee:@me label:bug" (repo:GITHUB_REPO is added when no repo/org is named)'),
@@ -224,7 +260,7 @@ tool('review_sonar', 'Inspect a PR/MR and its Sonar quality gate, coverage, dupl
   target, project: z.string().optional().describe('Sonar project key; defaults to configuration'),
   page, ruleKey: z.string().optional(),
   filePath: z.string().min(1).optional().describe('Optional repository-relative file to inspect at the PR head'),
-  lines: z.string().regex(/^\s*\d*\s*-?\s*\d*\s*$/).optional().describe('Line range of filePath, e.g. "40-90"'),
+  lines: lineRange.optional().describe('Line range of filePath, e.g. "40-90"'),
   full: z.boolean().default(false).describe('Raw Sonar responses instead of the compact view'),
 }, async ({ target, project, page, ruleKey, filePath, lines, full }) => {
   // Review metadata only: the diff is review_work's job, and sending it again doubled every Sonar call.

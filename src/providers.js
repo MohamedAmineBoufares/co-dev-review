@@ -1,4 +1,4 @@
-import { Http } from './http.js';
+import { Http, ApiError } from './http.js';
 import { required } from './config.js';
 
 const e = encodeURIComponent;
@@ -42,7 +42,13 @@ export class Providers {
   async source(target, file, ref) {
     if (file.split('/').some(x => x === '..' || x === '.') || file.startsWith('/')) throw new Error('File path must be repository-relative without traversal');
     const gl = target.provider === 'gitlab';
-    const raw = await this.client(target.provider).request(`${this.repo(target)}/${gl ? `repository/files/${e(file)}` : `contents/${file.split('/').map(e).join('/')}`}`, { query: { ref } });
+    let raw;
+    try { raw = await this.client(target.provider).request(`${this.repo(target)}/${gl ? `repository/files/${e(file)}` : `contents/${file.split('/').map(e).join('/')}`}`, { query: { ref } }); }
+    catch (error) {
+      // One call in eight asked for a file the API did not have; the generic message blamed access and configuration.
+      if (error instanceof ApiError && error.status === 404) throw new Error(`No file ${file} at ${String(ref).slice(0, 12)}. Use a path from the diff (deleted files have none at the head) and ref = review.head from step=read.`);
+      throw error;
+    }
     if (raw.encoding !== 'base64' || typeof raw.content !== 'string') throw new Error('File is too large, a directory, or not available as base64');
     return { file, ref, content: Buffer.from(raw.content, 'base64').toString('utf8') };
   }

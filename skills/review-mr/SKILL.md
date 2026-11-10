@@ -15,16 +15,16 @@ Checking out, installing, compiling, linting, searching call sites and running t
 
 Give it a strict contract:
 
-- Call exactly `review_work` step=`pipeline`, then `checkout`, `checks`, `blast_radius` and `tests`, with this target (only `pipeline` for a diff-only review). Nothing else: no other commands, no file edits, no conclusions about the code.
+- Call exactly `review_work` step=`verify` with this target and the chosen `packageManager` (only step=`pipeline` for a diff-only review); it runs pipeline, checkout, checks, blast_radius and tests in one call and returns `deterministic` ready for `prepare_comments`. Nothing else: no other commands, no file edits, no conclusions about the code.
 - Reply in at most 30 lines:
-  - the three `runId`s, the worktree path and the install status;
+  - the `deterministic` object verbatim, the worktree path and the install status;
   - every failing pipeline stage: stage, job, cause lines and its `onChangedLine` locations, and whether it ran on the review head;
   - every `checks` finding on a changed line as `path:line rule message` (at most 30), plus counts for the rest;
   - for each changed symbol, its caller count and up to five callers whose usage looks different from the others;
   - test results as passed/failed counts, plus each failing test's name and first error line;
   - any failure, verbatim.
 
-Keep every judgement in this conversation, on the main model: which rubric applies, what is a bug, its severity and confidence, the refutation, and the wording of comments. The subagent summarises evidence; it never decides what is wrong. Ask it for the full output of a specific finding when you need more. If the host cannot start subagents, run the steps here.
+Keep every judgement in this conversation, on the main model: which rubric applies, what is a bug, its severity and confidence, the refutation, and the wording of comments. The subagent summarises evidence; it never decides what is wrong. Ask it for the full output of a specific finding when you need more. Start the subagent right after step 1 and keep reading while it runs; collect its report before step 7. If the host cannot start subagents, run step=`verify` here: one call replaces steps 3 to 5b.
 
 1. **Read.** `review_work` step=`read`. Note the `rubrics`, `repoSkills` and `hunks` ledger it returns.
 

@@ -33,6 +33,8 @@ export function suggestRubrics(paths = []) {
   const covered = new Set(rubrics.flatMap(r => clean.filter(p => RUBRICS.find(x => x.id === r.id)?.match.test(p))));
   return {
     rubrics,
+    // Flat and deduplicated, so rubricsApplied can be copied instead of rebuilt from the entries above.
+    requiredSkills: [...new Set(rubrics.map(r => r.skill).filter(Boolean))],
     unmatched: clean.filter(p => !covered.has(p)).slice(0, 20),
     note: rubrics.length
       ? 'Load the named skills before forming findings, and review each listed focus explicitly. Unmatched files still need review; they simply have no packaged rubric.'
