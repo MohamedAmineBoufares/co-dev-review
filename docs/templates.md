@@ -125,6 +125,8 @@ One entry point. It sets the persona and rules for the whole conversation and ro
 | `pipeline <number or URL>` | As `fix-pipeline` |
 | `sonar <number or URL>` | As `fix-sonar` |
 | `ticket <id> [explain\|plan\|qa\|work]` | The ticket templates |
+| `bulk review [numbers or URLs \| open]` | Sizes several MRs/PRs, then one subagent each on a model that fits its effort |
+| `bulk tickets <ids>` | The same for ticket decomposition |
 | `off` | Leaves co-dev mode |
 
 ```bash

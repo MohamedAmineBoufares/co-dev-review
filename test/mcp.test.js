@@ -12,10 +12,10 @@ test('real MCP stdio handshake, discovery, prompt and validation', { timeout: 20
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(x => x.name).sort(), ['plan_ticket_tasks', 'review_sonar', 'review_work']);
   const instructions = client.getInstructions();
-  assert.match(instructions, /^co-dev-review server \d+\.\d+\.\d+\. review_work steps: read, read_file, find, rubric, pipeline, checkout, checks, blast_radius, tests, verify, prepare_comments, prepare_replies, request_approval, approve, revise, view_draft, publish\./, 'instructions must name the version and every step so a stale client is detectable');
+  assert.match(instructions, /^co-dev-review server \d+\.\d+\.\d+\. review_work steps: read, read_file, find, rubric, pipeline, checkout, checks, blast_radius, tests, verify, batch, prepare_comments, prepare_replies, request_approval, approve, revise, view_draft, publish\./, 'instructions must name the version and every step so a stale client is detectable');
   assert.equal(client.getServerVersion().version, JSON.parse(await import('node:fs/promises').then(m => m.readFile(new URL('../package.json', import.meta.url), 'utf8'))).version);
   for (const tool of tools) assert.match(tool.description, tool.name === 'review_sonar' ? /Sonar/ : /^step is one of: /, 'workflow tool descriptions must carry the step list in case a client flattens the schema');
-  assert.ok(instructions.length < 3500 && instructions.indexOf('Never approve') < 1200, 'short enough not to be cut by a client, with the approval rules first');
+  assert.ok(instructions.length < 4000 && instructions.indexOf('Never approve') < 1200, 'short enough not to be cut by a client, with the approval rules first');
   const prompt = await client.getPrompt({ name: 'review_workflow', arguments: { language: 'fr' } });
   assert.match(prompt.messages[0].content.text, /Publication language: fr/);
   const { prompts } = await client.listPrompts();

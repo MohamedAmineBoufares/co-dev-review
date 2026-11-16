@@ -38,6 +38,7 @@ Reviews local changes before pushing, or a remote GitLab MR or GitHub PR, and pu
 | `blast_radius` | `target?` or `mode`/`base`, `detail?`, `symbols?` | Changed exported symbols with their caller count and one caller per file; `symbols: [name]` or `detail: "full"` lists up to 50 callers each |
 | `tests` | `target?` or `mode`/`base` | Runs only the unit tests related to the changed files (Vitest `related`, Jest `--findRelatedTests`), per project; returns counts and the first lines of each failure |
 | `verify` | `target`, `packageManager`, `install`, `tests` | `pipeline` and `checkout` run together, then `checks`, `blastRadius` and `tests` in the worktree, each as `{ data }` or `{ error }`. The runs are recorded; `prepare_comments` finds them |
+| `batch` | `targets?` (≤ 20) | Sizes several MRs/PRs for a bulk review; without `targets`, the open ones of the configured project. Each item has its files and changed lines (generated files excluded), risk flags, pipeline status, whether you already reviewed it at this head, an `effort` (`low`/`medium`/`high`), the model tier that fits, and the `read` arguments to start with. One `brief` for the subagents comes with the list. An item that can't be read is reported in its own entry |
 | `prepare_comments` | `target`, `language` (`fr`/`en`), `items`, `coverage`, `rubricsApplied`, `rubricsSkipped?`, `deterministic?`, `approval?` | The saved draft and the approval outcome |
 | `prepare_replies` | `target`, `language`, `replies` (`threadId`, `body`, `resolve?`), `approval?` | A draft of replies to existing threads, approved and published like comments. `resolve` also resolves the thread (GitLab only) |
 | `request_approval` | `draftId`, `approval?` | Asks for approval of an existing draft again (in conversation mode, returns the preview to show) |
@@ -95,6 +96,7 @@ Turns a ticket into estimated child tasks, in Azure DevOps (child Tasks), Jira (
 | --- | --- | --- |
 | `search` | `query` (WIQL, JQL or GitHub issue search) or `queryId` (Azure saved query, Jira filter), `tracker?` | Up to 200 tickets: id, title, type, state, assignee, tags, area, iteration |
 | `read` | `ticketId`, `continuationToken?`, `full?` | Reviewer-relevant fields with HTML converted to text (description, acceptance criteria, repro steps), parent, children, related items, linked pull requests and attachments, `designLinks` (Figma URLs found in the ticket and its comments), and the discussion. `full: true` returns the raw work item |
+| `batch` | `ticketIds` (≤ 20), `tracker?` | Sizes several tickets for a bulk decomposition: description length, number of acceptance criteria, existing children, `effort`, model tier and `read` arguments, plus one `brief` for the subagents |
 | `prepare` | `ticketId`, `language`, `tasks`, `approval?` | The saved draft, the total hours and the approval outcome |
 | `request_approval`, `approve`, `revise`, `view_draft`, `publish` | `draftId`… | As for reviews; task ids are `T1`, `T2`… |
 

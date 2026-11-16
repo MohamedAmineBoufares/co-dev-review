@@ -168,3 +168,24 @@ test('read numbers files, collapses the lockfile, says what to do next and remem
   const same = await reviewContext(providers, service.withProject(target), 1, undefined, { store, since: 'last' });
   assert.equal(same.unchanged, true, 'nothing moved since the last draft');
 });
+
+test('bulk mode sizes each job so the host can pick a model for it', async t => {
+  const { reviewEffort, ticketEffort, reviewBatch, ticketBatch } = await import('../src/batch.js');
+  assert.equal(reviewEffort({ files: 2, lines: 40 }), 'low');
+  assert.equal(reviewEffort({ files: 6, lines: 180 }), 'medium');
+  assert.equal(reviewEffort({ files: 2, lines: 40, sensitive: true }), 'high', 'a small change to auth or a migration still gets the capable model');
+  assert.equal(reviewEffort({ files: 30, lines: 90 }), 'high');
+  assert.deepEqual([ticketEffort({ chars: 300, criteria: 2 }), ticketEffort({ chars: 1500, criteria: 5 }), ticketEffort({ chars: 900, criteria: 12 })], ['low', 'medium', 'high']);
+  const { service, target } = await fixture(t);
+  const first = await reviewBatch(service, [target]);
+  assert.deepEqual([first.items[0].files, first.items[0].changedLines, first.items[0].effort, first.items[0].reviewed], [1, 2, 'low', 'not reviewed here yet'], 'the lockfile does not count');
+  assert.deepEqual(first.items[0].read, { step: 'read', target: { provider: 'gitlab', number: 5, project: 'g/app' } });
+  assert.match(first.brief, /Do not call prepare_comments/);
+  await service.reviewDraft({ target, language: 'en', coverage: [{ hunks: 'rest', verdict: 'reviewed-clean' }], items: [{ body: 'ok', severity: 'minor', confidence: 'likely' }] });
+  assert.equal((await reviewBatch(service, [target])).items[0].skip, true, 'reviewed at this head already');
+  const trackers = { azure: { read: async ref => (ref.id === 2 ? Promise.reject(new Error('HTTP 404')) : { ticket: { title: 'Export', description: 'x'.repeat(700), acceptanceCriteria: '- a\n- b\n1. c\n4) d', children: [{ id: 9 }] } }) } };
+  const tickets = await ticketBatch({ trackers }, { TICKET_TRACKER: 'azure' }, ['1', '2'], 'azure');
+  assert.deepEqual([tickets.items[0].criteria, tickets.items[0].effort, tickets.items[0].skip], [4, 'medium', true]);
+  assert.deepEqual(tickets.items[1], { id: '2', error: 'HTTP 404' }, 'one unreadable ticket does not fail the batch');
+  assert.deepEqual(tickets.efforts, { medium: 1 });
+});
