@@ -23,6 +23,7 @@ import { reviewContext, sonarReport, sections } from './review-context.js';
 import { parseTarget } from './target.js';
 import { Finder } from './find.js';
 import { ledger, expandIds } from './hunks.js';
+import { reviewBatch, ticketBatch } from './batch.js';
 
 const config = loadConfig();
 // Behind a TLS-intercepting proxy the real server is the child; this process only relays stdio.
@@ -32,10 +33,10 @@ const runs = new Runs();
 const service = new Service(config, { runs });
 const worktrees = new Worktrees(config);
 const finder = new Finder(config, service.providers, worktrees);
-const provider = z.enum(['gitlab', 'github']);
 // A URL, a bare number or the object: whatever the user pasted is turned into the object before validation.
-const target = z.preprocess(value => parseTarget(value, config), z.object({ provider, project: z.string().min(1).optional().describe('GitLab ID/path or GitHub owner/repository; defaults to the configured project'), number: z.number().int().positive() }, { invalid_type_error: 'target is the MR/PR URL, its number, or { provider, project?, number }' }))
+const makeTarget = () => z.preprocess(value => parseTarget(value, config), z.object({ provider: z.enum(['gitlab', 'github']), project: z.string().min(1).optional().describe('GitLab ID/path or GitHub owner/repository; defaults to the configured project'), number: z.number().int().positive() }, { invalid_type_error: 'target is the MR/PR URL, its number, or { provider, project?, number }' }))
   .describe('The MR/PR: its URL, its number for the configured project, or { provider: "gitlab"|"github", project?, number }');
+const target = makeTarget();
 const page = z.coerce.number().int().min(1).max(1000).default(1);
 const language = z.enum(['fr', 'en']);
 const id = () => z.string().regex(/^[0-9a-f-]{8,36}$/i, 'An id as the server returned it (draft.id or runId); its first 8 characters are enough');
@@ -183,7 +184,7 @@ const diffMode = z.enum(['working', 'staged', 'branch']).default('working').desc
 const diffBase = z.string().default('HEAD').describe('Local reviews only: the comparison ref, e.g. origin/develop for mode=branch');
 const detail = z.enum(['summary', 'full']).default('summary').describe('summary keeps results short; full returns every finding or caller');
 const inWorktree = target.optional().describe('Remote MR/PR prepared with step=checkout or step=verify; omit for the local checkout');
-workflowTool('review_work', 'Review local changes before pushing, or a GitLab MR / GitHub PR. Start with step=read and follow the "next" field of each result; an error lists everything to fix. The assistant examines the code and drafts French/English comments; nothing is posted until the user approves the saved draft. These steps support one review; they are not separate tools.', [
+workflowTool('review_work', 'Review local changes before pushing, or a GitLab MR / GitHub PR. For several at once, step=batch sizes each one and says which model effort it needs. Start with step=read and follow the "next" field of each result; an error lists everything to fix. The assistant examines the code and drafts French/English comments; nothing is posted until the user approves the saved draft. These steps support one review; they are not separate tools.', [
   z.object({ step: z.literal('read'), target: target.optional(), page, mode: diffMode, base: diffBase,
     since: z.string().regex(/^(last|[0-9a-f]{7,40})$/i, 'since is "last" or a commit sha').optional().describe('Re-review: "last" returns only what changed since the head of your previous draft of this MR/PR (or since a given commit sha), with that draft\'s comments') }),
   z.object({ step: z.literal('read_file'), target: target.describe('The MR/PR. A local review has no read_file: open files with the host\'s own file tools'), path: z.string().min(1).optional().describe('One repository-relative path; a near miss (wrong root, alias, case) is resolved for you'), paths: z.array(z.string().min(1)).min(1).max(20).optional().describe('Several paths in one call, e.g. the callers to read before refuting a finding; one failing path does not fail the others'),
@@ -197,6 +198,7 @@ workflowTool('review_work', 'Review local changes before pushing, or a GitLab MR
   z.object({ step: z.literal('blast_radius'), target: inWorktree, mode: diffMode, base: diffBase, detail, symbols: z.array(z.string().min(1).max(64)).max(10).optional().describe('Expand every caller of these symbols only') }),
   z.object({ step: z.literal('tests'), target: inWorktree, mode: diffMode, base: diffBase }),
   z.object({ step: z.literal('verify'), target, packageManager: z.enum(packageManagers).default('auto'), install: z.boolean().default(true), tests: z.boolean().default(true).describe('Also run the unit tests related to the change') }),
+  z.object({ step: z.literal('batch'), targets: z.array(makeTarget()).min(1).max(20).optional().describe('Several MRs/PRs to size for a bulk review, each a URL, a number or an object; omit for the open ones of the configured project') }),
   z.object({ step: z.literal('prepare_comments'), target, language, items: z.array(finding, { required_error: 'items is required: the findings to post, each with body, severity, confidence and, for an inline comment, path plus lineText. For a clean review send one general comment (no path, severity suggestion, confidence confirmed) saying what was checked and found clean' }).min(1).max(100), coverage, rubricsApplied: z.array(z.string().trim().min(1).max(64), { required_error: 'rubricsApplied is required: copy read.rubrics.requiredSkills, minus anything listed in rubricsSkipped, plus the repoSkills you read' }).max(20).describe('The skills you actually read and applied: copy read.rubrics.requiredSkills, minus anything listed in rubricsSkipped, plus the repoSkills you read, e.g. ["review-react-ts", "house-style"]'), rubricsSkipped: z.array(z.object({ name: z.string().trim().min(1).max(64), reason: z.string().trim().min(15).max(300) })).max(20).default([]).describe('Routed rubrics you deliberately did not apply, each with a reason the approver sees'), deterministic: deterministic.optional(), approval: approvalChoice }),
   z.object({ step: z.literal('prepare_replies'), target, language, replies: z.array(z.object({
     threadId: z.coerce.string().trim().min(1).max(64).describe('id of a discussion returned by step=read'), body: text().describe('The reply, in the selected language'),
@@ -214,10 +216,19 @@ workflowTool('review_work', 'Review local changes before pushing, or a GitLab MR
   if (r.step === 'checkout') return worktrees.prepare(service.providers, r.target, { install: r.install, packageManager: r.packageManager });
   if (r.step === 'checks' || r.step === 'blast_radius' || r.step === 'tests') return deterministicPass(r);
   if (r.step === 'verify') return verify(r);
+  if (r.step === 'batch') return reviewBatch(service, r.targets ?? await openReviews());
   if (r.step === 'prepare_comments') { const draft = await service.reviewDraft(r); return preview(draft, await requestApproval(draft, r.approval)); }
   if (r.step === 'prepare_replies') { const draft = await service.replyDraft(r); return preview(draft, await requestApproval(draft, r.approval)); }
   return draftStep('review', r.step, r.draftId, r.approval, r);
 });
+
+// The open MRs/PRs of the configured project, for a bulk review that names none.
+async function openReviews() {
+  const base = parseTarget(1, config);
+  const open = await service.providers.listReviews(service.withProject(base));
+  if (!open.length) throw new Error('No open merge/pull request in the configured project. Pass targets.');
+  return open.slice(0, 20).map(review => ({ ...base, number: review.iid ?? review.number }));
+}
 
 // One file, several, or the code around some hunks. A path that does not exist is looked up by name before
 // failing: one read in eight used to be a guess at an import alias.
@@ -289,7 +300,7 @@ const plannedTask = z.object({
 const ticketRef = z.preprocess(value => (typeof value === 'number' ? String(value) : value), z.string().trim().regex(/^(?:[A-Za-z][A-Za-z0-9_]+-\d+|(?:[\w.-]+\/[\w.-]+)?#\d+|\d+)$/, 'Ticket ids look like 42 (Azure), PROJ-123 (Jira) or owner/repo#45 (GitHub)'))
   .describe('Azure work item id (42), Jira key (PROJ-123) or GitHub issue (owner/repo#45, or #45 with GITHUB_REPO)');
 const trackerChoice = z.enum(trackerNames).optional().describe(`Ticket tracker; inferred from the id, else ${defaultTracker(config)} (TICKET_TRACKER)`);
-workflowTool('plan_ticket_tasks', 'Works with Azure DevOps, Jira and GitHub Issues. Turn a ticket into clear implementation and testing tasks with estimated hours, created under it after approval (Azure child Tasks, Jira sub-tasks, GitHub sub-issues). Use step=search to find tickets: WIQL or a saved query id for Azure, JQL or a filter id for Jira, a search query for GitHub. step=read returns the ticket, its children and discussion. step=prepare saves the plan for approval.', [
+workflowTool('plan_ticket_tasks', 'Works with Azure DevOps, Jira and GitHub Issues. Turn a ticket into clear implementation and testing tasks with estimated hours, created under it after approval (Azure child Tasks, Jira sub-tasks, GitHub sub-issues). Use step=search to find tickets: WIQL or a saved query id for Azure, JQL or a filter id for Jira, a search query for GitHub. step=read returns the ticket, its children and discussion. step=prepare saves the plan for approval. step=batch sizes several tickets for a bulk decomposition.', [
   z.object({
     step: z.literal('search'), tracker: trackerChoice,
     query: z.string().trim().min(1).max(4000).optional().describe('Azure: WIQL (supports @project, @Me). Jira: JQL, e.g. "assignee = currentUser() AND statusCategory != Done". GitHub: issue search, e.g. "is:open assignee:@me label:bug" (repo:GITHUB_REPO is added when no repo/org is named)'),
@@ -297,6 +308,7 @@ workflowTool('plan_ticket_tasks', 'Works with Azure DevOps, Jira and GitHub Issu
     queryId: z.string().trim().regex(/^[\w-]{1,64}$/).optional().describe('Azure saved query GUID (from its URL) or Jira filter id'),
   }),
   z.object({ step: z.literal('read'), ticketId: ticketRef, tracker: trackerChoice, continuationToken: z.string().optional(), full: z.boolean().default(false).describe('Every raw field instead of the reviewer-relevant ones') }),
+  z.object({ step: z.literal('batch'), ticketIds: z.array(z.coerce.string().trim().min(1).max(100)).min(1).max(20).describe('Several ticket ids to size for a bulk decomposition, e.g. ["42", "43"] or ["PROJ-1", "PROJ-2"]'), tracker: trackerChoice }),
   z.object({ step: z.literal('prepare'), ticketId: ticketRef, tracker: trackerChoice, language, tasks: z.array(plannedTask).min(1).max(50), approval: approvalChoice }),
   ...savedSteps,
 ], async r => {
@@ -310,6 +322,7 @@ workflowTool('plan_ticket_tasks', 'Works with Azure DevOps, Jira and GitHub Issu
     const ref = resolveTicket(config, r.ticketId, r.tracker);
     return { tracker: ref.tracker, ...withDesignLinks(await service.trackers[ref.tracker].read(ref, r.continuationToken, { full: r.full })) };
   }
+  if (r.step === 'batch') return ticketBatch(service, config, r.ticketIds, r.tracker);
   if (r.step === 'prepare') {
     const { tracker: name } = resolveTicket(config, r.ticketId, r.tracker);
     const tracker = service.trackers[name];

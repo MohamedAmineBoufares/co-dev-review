@@ -111,6 +111,21 @@ A failing test turns "this looks wrong" into a confirmed finding. A project whos
 - **Suggestions.** A finding can carry a `suggestion`: the replacement for its line, posted as a block the author applies in one click.
 - **Memory of your choices.** Comments you leave unticked at approval are remembered on your machine. The next `read` of the same project returns the most recent ones as `rejectedBefore`, so the assistant doesn't raise the same kind of point again. This is the only feedback the reviewer gets, and it works with any model.
 
+## Bulk: many reviews or tickets, one model each
+
+`/co-dev bulk review open` or `/co-dev bulk tickets 101 102 103` handles several items in one go. The server can't start a model, so the work is split in two:
+
+1. **The server sizes each item** (`batch`). A review is `low` up to 60 changed lines in 3 files, `high` above 400 lines or 15 files, or whenever it touches auth, secrets or a migration; otherwise `medium`. A ticket is sized by the length of its description and the number of acceptance criteria. Generated files don't count, and an MR/PR you already reviewed at its current head is marked to skip.
+2. **Your assistant starts one subagent per item**, at most four at a time, on a model that fits the effort: its smallest for `low`, its default for `medium`, its most capable for `high`. Each gets the same brief and reports a short table.
+
+| Effort | Review | Ticket | Model |
+| --- | --- | --- | --- |
+| `low` | ≤ 60 lines, ≤ 3 files | < 600 characters, ≤ 3 criteria | Smallest, fastest |
+| `medium` | everything between | everything between | Default |
+| `high` | > 400 lines, > 15 files, or auth / data | > 3,000 characters or > 8 criteria | Most capable |
+
+Subagents only read and report. They never draft, approve, publish or edit files. You get one merged table, choose what to keep, and the drafts are prepared and approved in the main conversation, one MR/PR or ticket at a time. An assistant without subagents does the items itself, smallest first.
+
 ## Finding code outside the diff
 
 A diff-only review fails when the model guesses where a caller lives. `find` answers that: `path` returns the files matching a name or partial path at the review head, and `query` returns where a text appears. `read_file` uses the same lookup when a path doesn't exist, so an import alias or a wrong root resolves instead of failing, and `hunks: "3.2"` reads a hunk with the code around it without any line arithmetic.

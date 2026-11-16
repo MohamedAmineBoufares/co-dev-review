@@ -52,6 +52,8 @@ export function summarize(tool, args, result, error) {
       return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, projects: Object.fromEntries((result?.projects ?? []).map(p => [p.project, p.total !== undefined ? `${p.passed}/${p.total} passed` : p.status])) };
     case 'read_file':
       return { ...entry, path: args.request.path ?? args.request.paths?.join(', ') ?? (args.request.hunks && `hunks ${args.request.hunks}`), lines: args.request.lines, resolved: [result, ...(result?.files ?? [])].filter(x => x?.resolvedFrom).length || undefined };
+    case 'batch':
+      return { ...entry, items: result?.items?.length, efforts: result?.efforts, failed: result?.items?.filter(x => x.error).length || undefined };
     case 'find':
       return { ...entry, paths: result?.paths?.length, matches: result?.matches?.length, source: result?.source?.split(' ')[0] };
     case 'prepare_replies':

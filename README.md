@@ -68,7 +68,11 @@ Type `/co-dev` followed by what you want. The assistant becomes **co-dev** for t
 | `/co-dev pipeline 123` | Why the pipeline is red, with `file:line` |
 | `/co-dev sonar 123` | Quality gate, issues and hotspots |
 | `/co-dev ticket 456 plan` | Explain, plan, test (`qa`) or implement (`work`) a ticket |
+| `/co-dev bulk review open` | Every open MR/PR (or the numbers you list): each is sized, then reviewed by its own subagent on a model that fits its effort |
+| `/co-dev bulk tickets 101 102 103` | Several tickets decomposed the same way, one merged table of tasks |
 | `/co-dev` | Lists the above and asks |
+
+In bulk mode the subagents only read and report; you still approve every draft yourself. See [Bulk](docs/how-reviews-work.md#bulk-many-reviews-or-tickets-one-model-each).
 
 It is `/co-dev` in Claude Code, Codex and Copilot, where the skills are linked; `/co-dev-review:co-dev` when loaded as a Claude Code plugin; and the `co-dev` prompt in any other MCP client (`/mcp__co-dev-review__co-dev` in Claude Code, **+** → co-dev-review in Claude Desktop).
 
