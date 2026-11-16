@@ -4,7 +4,7 @@ import { stdin, stdout } from 'node:process';
 import { loadConfig, localDir } from './config.js';
 import { Store, digest } from './store.js';
 import { safe, style, parseSelection, renderItem, renderHeader, editInEditor } from './review-ui.js';
-import { readTrace } from './trace.js';
+import { readTrace, traceStats } from './trace.js';
 import { doctor } from './doctor.js';
 import { init, uninstall, importConfig } from './init.js';
 import { clients } from './clients.js';
@@ -133,6 +133,7 @@ const HELP = `co-dev-review <command>
   templates                  list the conversation templates
   template <name> [k=v ...]  print a template filled in, to paste into any assistant
   trace [n]                  what the last reviews actually did
+  stats                      failure rate of each step, first-try drafts and the most frequent errors
   link-skills [client...] [--dry-run] [--force]
   import-config <mcp.json>   import allowlisted settings from another MCP configuration
   reconcile <draft> <item> posted <remote-id> | not-posted
@@ -210,6 +211,15 @@ Your own templates go in ${templateDirs()[1]} (same name overrides).`));
     if (!events.length) { console.log(`No trace yet. Run a review through the server first; every tool call is recorded in ${localDir}/trace.jsonl.`); return; }
     console.log(renderTrace(events));
     console.log(style.dim('\nSkills a client loads natively (Claude Code Skill tool, Codex skills) and files read with the host\'s own tools do not pass through this server. "offered" is what the server returned, "fetched via tool" is what came through step=rubric, "declared applied" is the assistant\'s own statement at prepare time.'));
+    return;
+  }
+  if (command === 'stats') {
+    const stats = traceStats(readTrace(Infinity));
+    if (!stats.calls) { console.log('No trace yet. Run a review through the server first.'); return; }
+    console.log(`${style.bold(`${stats.calls} calls`)} from ${stats.from} to ${stats.to}\n`);
+    for (const row of stats.steps) console.log(`  ${row.step.padEnd(34)} ${String(row.calls).padStart(5)} calls  ${row.errors ? style.yellow(`${row.errors} failed (${row.rate})`) : style.green('0 failed')}`);
+    console.log(`\n${style.bold('Reviews')}  ${stats.reviews.drafts} drafted · ${stats.reviews.firstTry} saved at the first prepare_comments · ${stats.reviews.withChecksRun} with compiler/linter evidence`);
+    if (stats.topErrors.length) console.log(`\n${style.bold('Most frequent errors')}\n${stats.topErrors.map(x => `  ${String(x.count).padStart(4)}  ${safe(x.message)}`).join('\n')}`);
     return;
   }
   if (command === 'reconcile') {

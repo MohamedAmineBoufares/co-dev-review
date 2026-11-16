@@ -4,9 +4,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 // The steps a workflow accepts are the honest version marker: tool names never change, so a
 // client still holding an old schema looks identical until you ask what it can actually call.
-const steps = tool => (tool.inputSchema?.properties?.request?.anyOf ?? [])
-  .map(variant => variant.properties?.step?.const)
-  .filter(Boolean);
+const steps = tool => tool.inputSchema?.properties?.step?.enum ?? [];
 
 // Clients translate tool schemas for their model; Gemini-based ones (Antigravity, Gemini CLI) and some
 // Copilot models accept only a subset of JSON Schema. List what each tool uses, so a rejection is explainable.

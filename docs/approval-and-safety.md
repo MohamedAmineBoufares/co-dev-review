@@ -4,7 +4,9 @@ co-dev-review reads freely, but writes only after you've approved exactly what w
 
 ## Approving a draft
 
-When the assistant calls `prepare_comments` (reviews) or `prepare` (tasks), the server saves the exact draft and asks you to approve it.
+When the assistant calls `prepare_comments` (reviews), `prepare_replies` (answers to existing threads) or `prepare` (tasks), the server saves the exact draft and asks you to approve it.
+
+A review preview also carries what you need to judge the draft as a whole: an `Evidence` line saying whether the compiler, linters and tests ran on this commit, how many hunks were claimed clean in bulk, and a warning on any comment that sits within three lines of a thread someone already opened. A reply shows who it answers, what they wrote, and whether it resolves the thread.
 
 ### In the conversation (default)
 
@@ -52,9 +54,12 @@ This relies on the assistant relaying your reply faithfully. A merge request con
 - **The model never sees the browser page's address.** It carries a random token that is never returned to the model. The page accepts requests only for `127.0.0.1:<port>`, which blocks DNS rebinding, can be used once, and expires after 30 minutes.
 - **Approval is tied to exact content.** It is bound to the draft's content hash, the selected item ids and a 24-hour expiry, and records where it came from (`via`: conversation, in-chat, browser or terminal). Editing an item voids any earlier approval.
 - **Publishing re-checks the target.** It checks the destination and the current PR head. A new commit on the MR, or a changed parent ticket, means a new draft.
-- **Inline comments are anchored to the reviewed commit,** on validated added or deleted lines.
+- **Inline comments are anchored to the reviewed commit,** on a validated line of the diff: added, deleted, or unchanged inside a hunk.
+- **Replies only go to threads that exist.** `prepare_replies` checks each thread id against the review's discussions before saving the draft.
 
-No merge, approval verdict, commit, push or Sonar status change is ever exposed. Comments are posted as individual discussions, not as a GitHub APPROVE/REQUEST_CHANGES review.
+The only writes are the comments, replies and tasks you approved, plus resolving a GitLab thread when an approved reply says so. No merge, approval verdict, commit, push or Sonar status change is ever exposed. Comments are posted as individual discussions, not as a GitHub APPROVE/REQUEST_CHANGES review. If a reply is posted but its thread can't be resolved, the journal records a warning and the reply is not sent twice.
+
+What you leave unticked at approval is kept with the draft on your machine. The next review of the same project gets the most recent of those comments (severity, path and the first 160 characters) as `rejectedBefore`. Nothing leaves your machine for this; delete the drafts in the state folder to forget them.
 
 Reading is guarded too. Everything that comes from repositories, tickets and analyses is treated as untrusted data, never as instructions. Tokens are redacted from error messages, and the trace never records bodies, source text or tokens.
 

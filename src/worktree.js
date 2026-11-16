@@ -178,7 +178,7 @@ export class Worktrees {
     const absolute = path.resolve(entry.path, file);
     if (!absolute.startsWith(path.resolve(entry.path) + path.sep)) throw new Error('File path must be repository-relative without traversal');
     let stats;
-    try { stats = fs.statSync(absolute); } catch { throw new Error(`${file} does not exist at ${ref.slice(0, 8)}`); }
+    try { stats = fs.statSync(absolute); } catch { throw Object.assign(new Error(`No file ${file} at ${ref.slice(0, 8)}. step=find with path lists the paths that exist.`), { notFound: true }); }
     if (!stats.isFile() || stats.size > MAX_FILE) throw new Error('File is too large or a directory');
     return { file, ref, content: fs.readFileSync(absolute, 'utf8'), source: 'worktree' };
   }

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { required } from './config.js';
 import { ledger, splitUnifiedDiff } from './hunks.js';
+import { numberedFile, compactRubrics } from './compact.js';
 import { suggestRubrics } from './rubrics.js';
 import { repoSkills } from './repo-skills.js';
 const exec = promisify(execFile);
@@ -50,12 +51,13 @@ export async function localDiff(config, { mode = 'working', base = 'HEAD', page 
   const current = split[page - 1] ?? [];
   const startIndex = split.slice(0, page - 1).reduce((n, group) => n + group.length, 0);
   const result = { head, base: resolved, mode, page, fileCount: files.length,
-    changes: current.map(compactLocalFile), hunks: ledger(current, startIndex),
+    changes: current.map((file, i) => numberedFile(compactLocalFile(file), startIndex + i + 1)), hunkCount: ledger(current, startIndex).length,
     nextPage: page < split.length ? page + 1 : null };
-  if (page > 1) return { ...result, note: 'Rubrics, repoSkills and status were returned with page 1.' };
+  if (page > 1) return result;
   return { ...result, status,
-    rubrics: suggestRubrics(files.map(file => file.path)), repoSkills: repoSkills(config),
-    note: 'Read-only snapshot. Continue nextPage until null. Untracked file contents are not in git diff; inspect them separately. Load the skills named in rubrics (or fetch their text with step=rubric) and read the repoSkills that match this change before judging the code, and account for every hunk id. Run step=checks, step=blast_radius and step=tests before concluding: they surface what reading a diff cannot.' };
+    rubrics: compactRubrics(suggestRubrics(files.map(file => file.path))), repoSkills: repoSkills(config),
+    next: ['Continue nextPage until null', 'Load the skills in rubrics.requiredSkills (or step=rubric) and the repoSkills that match this change', 'step=checks, step=blast_radius and step=tests: they surface what reading a diff cannot', 'Read files with your own file tools; report findings to the user'],
+    note: 'Read-only snapshot. Each file has a number n; hunk n.k is its k-th @@. Untracked files are not in git diff: inspect them separately.' };
 }
 
 // Where the local checkout actually is, so a remote review can say whether checks and blast

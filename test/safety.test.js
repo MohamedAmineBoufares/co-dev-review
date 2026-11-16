@@ -77,7 +77,10 @@ test('uncertain remote writes are never retried automatically', async t => {
 });
 test('invalid diff lines are rejected before saving', async t => {
   const { service } = await fixture(t);
-  await assert.rejects(service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', path: 'new.js', line: 2, side: 'RIGHT' }], coverage: [{ hunks: '1.1', verdict: 'finding' }], deterministic: skippedPasses }), /Invalid or unavailable/);
+  await assert.rejects(service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', path: 'new.js', line: 9, side: 'RIGHT' }], coverage: [{ hunks: '1.1', verdict: 'finding' }], deterministic: skippedPasses }), /Invalid or unavailable/);
+  // An unchanged line shown in the hunk is a valid place for a comment; the provider needs both of its numbers.
+  const d = await service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor', path: 'new.js', line: 2, side: 'RIGHT' }], coverage: [], deterministic: skippedPasses });
+  assert.deepEqual([d.items[0].unchanged, d.items[0].oldLine, d.items[0].line], [true, 2, 2]);
 });
 test('diff parser handles content starting with plus/minus characters', () => {
   const a = anchors('--- a/x\n+++ b/x\n@@ -4,2 +9,2 @@\n---old\n+++new\n same');
@@ -105,7 +108,10 @@ test('draft paths cannot escape the store', async t => {
 test('a draft that leaves part of the diff unaccounted for is rejected', async t => {
   const { service } = await fixture(t);
   await assert.rejects(service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', coverage: [], deterministic: skippedPasses,
-    items: [{ body: 'x', severity: 'minor', path: 'new.js', line: 1, side: 'RIGHT' }] }), /No verdict for 1 of 1 hunks/);
+    items: [{ body: 'x', severity: 'minor' }] }), /No verdict for 1 of 1 hunks/);
+  // The hunk a comment is anchored in is covered by that comment.
+  const d = await service.reviewDraft({ target: { provider: 'gitlab', number: 1 }, language: 'en', coverage: [], deterministic: skippedPasses, items: [{ body: 'x', severity: 'minor', path: 'new.js', line: 1, side: 'RIGHT' }] });
+  assert.deepEqual(d.coverage.summary, { finding: 1 });
 });
 test('approved review comments keep the diff context shown at approval time', async t => {
   const { draft } = await fixture(t);
@@ -117,9 +123,14 @@ test('approved review comments keep the diff context shown at approval time', as
 });
 
 test('a draft must carry deterministic evidence or an explicit skip', async t => {
-  const { service } = await fixture(t);
+  const { service, runs, state } = await fixture(t);
   const request = { target: { provider: 'gitlab', number: 1 }, language: 'en', items: [{ body: 'x', severity: 'minor' }], coverage: [{ hunks: '1.1', verdict: 'reviewed-clean' }] };
-  await assert.rejects(service.reviewDraft(request), /deterministic.checks is required/);
+  // Left out, the passes are looked up; none recorded means "not run", which the approver sees.
+  assert.match((await service.reviewDraft(request)).deterministic.checks.skipped, /step=checks was not run on this head/);
+  const recorded = await runs.record({ kind: 'checks', target: request.target, mode: 'branch', head: state.head, base: 'base', changedFileCount: 1, summary: {} });
+  const found = await service.reviewDraft(request);
+  assert.equal(found.deterministic.checks.runId, recorded.id, 'a run recorded for this review head is found without its id');
+  assert.match(found.deterministic.blastRadius.skipped, /was not run/);
   const d = await service.reviewDraft({ ...request, deterministic: skippedPasses });
   assert.equal(d.deterministic.checks.skipped, skippedPasses.checks.skipped, 'a skip reason reaches the approver');
 });

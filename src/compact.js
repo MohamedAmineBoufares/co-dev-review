@@ -2,7 +2,9 @@
 // The model needs a fraction of it, and every extra field costs context in every review.
 // These shapers keep what a reviewer or planner uses and drop the rest; `full` views stay available.
 
-const ENTITIES = { nbsp: ' ', lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", '#39': "'" };
+import { isGenerated } from './hunks.js';
+
+const ENTITIES ={ nbsp: ' ', lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", '#39': "'" };
 export function htmlToText(html, limit = 20000) {
   if (html === undefined || html === null) return undefined;
   const text = String(html)
@@ -52,6 +54,26 @@ export function compactFile(file) {
     path, oldPath: oldPath && oldPath !== path ? oldPath : undefined, status,
     patch: file.diff ?? file.patch,
     unavailable: file.too_large ? 'too large' : file.collapsed ? 'collapsed by provider' : (file.diff ?? file.patch) ? undefined : 'no patch returned',
+  });
+}
+
+// A file as the reviewer reads it: numbered, so hunk n.k is the k-th @@ of file n and no separate ledger
+// repeats every header. Generated files keep their size and lose their patch.
+export function numberedFile(compact, n) {
+  const hunks = (String(compact.patch ?? '').match(/^@@ /gm) ?? []).length || 1;
+  if (!compact.patch || !isGenerated(compact.path)) return { n, ...compact, hunks };
+  const { patch, ...rest } = compact;
+  const count = mark => patch.split('\n').filter(line => line.startsWith(mark) && !line.startsWith(mark.repeat(3))).length;
+  return { n, ...rest, hunks, collapsed: `generated file, +${count('+')} -${count('-')}: patch not shown and its hunks need no verdict. read_file shows it.` };
+}
+// The skills hold the detail; the read result only has to say which ones to load and why.
+export function compactRubrics({ rubrics, requiredSkills, unmatched }) {
+  return compactObject({
+    requiredSkills,
+    routes: rubrics.map(r => `${r.id}: ${r.skill} (${r.fileCount} file${r.fileCount === 1 ? '' : 's'})`),
+    // Not in any skill: what to do when a change ships without tests.
+    testsMissing: rubrics.find(r => r.id === 'tests-missing')?.focus,
+    unmatched,
   });
 }
 
@@ -157,8 +179,8 @@ export function draftSummary(draft) {
   return compactObject({
     id: draft.id, kind: draft.kind, language: draft.language, destination: draft.destination, target: draft.target,
     head: draft.snapshot?.head, parent: draft.parent?.id,
-    items: draft.items.map(item => compactObject({ id: item.id, severity: item.severity, confidence: item.confidence, path: item.path, line: item.line, lineCorrectedFrom: item.lineCorrectedFrom, title: item.title, estimatedHours: item.estimatedHours })),
-    coverage: draft.coverage && { hunkCount: draft.coverage.hunkCount, claimCount: draft.coverage.claims?.length },
+    items: draft.items.map(item => compactObject({ id: item.id, severity: item.severity, confidence: item.confidence, path: item.path, line: item.line, lineCorrectedFrom: item.lineCorrectedFrom, unchangedLine: item.unchanged, nearExisting: item.nearExisting, replyTo: item.replyTo, resolve: item.resolve, title: item.title, estimatedHours: item.estimatedHours })),
+    coverage: draft.coverage && compactObject({ hunkCount: draft.coverage.hunkCount, claimCount: draft.coverage.claims?.length, ...draft.coverage.summary, claimedInBulk: draft.coverage.bulk || undefined }),
     rubricsApplied: draft.rubricsApplied, rubricsSkipped: draft.rubricsSkipped, deterministic: draft.deterministic,
   });
 }

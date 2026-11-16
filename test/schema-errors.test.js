@@ -16,23 +16,26 @@ test('schema errors tell the agent how to fix the call', { timeout: 20000 }, asy
     try { return (await client.callTool({ name, arguments: args })).content[0].text; }
     catch (error) { return error.message; }
   };
-  assert.match(await call('review_work', { step: 'read' }), /Wrap the arguments as \{ "request": \{ "step"/);
+  assert.match(await call('review_work', {}), /step must be one of read, read_file, find, .*\. Start with step=read/);
   assert.match(await call('review_work', { request: { step: 'diff' } }), /step must be one of read, read_file, .*verify.*\. Start with step=read/);
   const approve = await call('review_work', { request: { step: 'approve', draftId: '1a2b3c4d', selectedIds: ['all'], userWords: 'approve all' } });
-  assert.match(approve, /full 36-character id/);
+  assert.match(await call('review_work', { step: 'view_draft', draftId: 'xyz' }), /first 8 characters are enough/);
   assert.match(approve, /"all" is not an id/);
   assert.match(await call('review_sonar', { target: { provider: 'gitlab', number: 1 }, lines: 'L40-90' }), /lines must look like "120-220"/);
   assert.match(await call('plan_ticket_tasks', { request: { step: 'read', ticketId: 'ticket 42' } }), /Ticket ids look like 42 \(Azure\), PROJ-123/);
-  assert.match(await call('review_work', { request: { step: 'read_file', target: { provider: 'gitlab', number: 1 }, ref: 'abc' } }), /Give path for one file or paths for up to 20/);
+  assert.match(await call('review_work', { request: { step: 'read_file', target: { provider: 'gitlab', number: 1 }, ref: 'abc' } }), /Give path for one file, paths for up to 20, or hunks/);
   // The call an agent made for a clean review: an invented field and the four required ones missing.
   const clean = await call('review_work', { request: { step: 'prepare_comments', target: { provider: 'gitlab', number: 1471 }, language: 'fr', comments: [] } });
   assert.match(clean, /Unrecognized key\(s\) in object: 'comments'/);
   assert.match(clean, /items is required: .*For a clean review send one general comment/);
   assert.match(clean, /coverage is required: one \{ hunks, verdict \} claim per hunk id/);
   assert.match(clean, /rubricsApplied is required: copy read\.rubrics\.requiredSkills/);
-  assert.match(clean, /deterministic is required: \{ checks: \{ runId \}, blastRadius: \{ runId \} \} from step=verify/);
+  // What models actually send: the arguments as a JSON string, null for "not given", a URL for the target, a range typed wrong.
+  const lenient = await call('review_work', { request: JSON.stringify({ step: 'read_file', target: 'https://gitlab.example.com/group/app/-/merge_requests/12', ref: null, lines: 'L1' }) });
+  assert.match(lenient, /^Invalid arguments for step=read_file: lines: lines must look like/, 'only the real mistake is reported');
   const { tools } = await client.listTools();
-  const steps = tools.find(x => x.name === 'review_work').inputSchema.properties.request.anyOf.map(v => v.properties.step.const);
+  const steps = tools.find(x => x.name === 'review_work').inputSchema.properties.step.enum;
+  assert.equal(JSON.stringify(tools).includes('anyOf'), false, 'no unions in the published schema: Gemini-based clients reject them');
   assert.ok(steps.includes('verify'), 'verify is published as a step');
 });
 

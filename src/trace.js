@@ -25,9 +25,9 @@ export function summarize(tool, args, result, error) {
     case 'read':
       if (tool === 'plan_ticket_tasks') return { ...entry, ticket: result?.ticket?.id ?? result?.ticket?.key, type: result?.ticket?.type ?? result?.ticket?.fields?.['System.WorkItemType'], tracker: result?.tracker };
       return { ...entry,
-        files: result?.changes?.data?.length ?? (Array.isArray(result?.changes) ? result.fileCount : undefined) ?? (result?.hunks ? new Set(result.hunks.map(h => h.path)).size : undefined),
-        hunks: result?.hunks?.length, page: result?.page, incomplete: result?.incomplete,
-        rubricsOffered: [...new Set(result?.rubrics?.rubrics?.map(r => r.skill ?? `${r.id} (no packaged skill)`) ?? [])],
+        files: result?.changes?.data?.length ?? (Array.isArray(result?.changes) ? result.fileCount ?? result.changes.length : undefined),
+        hunks: result?.hunkCount, since: result?.since?.slice(0, 12), page: result?.page, incomplete: result?.incomplete,
+        rubricsOffered: result?.rubrics?.requiredSkills ?? [],
         repoSkillsOffered: result?.repoSkills?.skills?.map(s => s.name),
         gate: result?.sonar?.gate?.data?.status ?? result?.sonar?.gate?.data?.projectStatus?.status,
         checkout: result?.localCheckout ? (result.localCheckout.worktree?.matchesReview ? 'review worktree at head' : result.localCheckout.matchesReview ? 'matches review head' : `MISMATCH: local is on ${result.localCheckout.branch}`) : undefined };
@@ -51,7 +51,11 @@ export function summarize(tool, args, result, error) {
     case 'tests':
       return { ...entry, run: result?.runId, worktree: Boolean(result?.worktree), scope: `${result?.mode} vs ${String(result?.base).slice(0, 12)}`, projects: Object.fromEntries((result?.projects ?? []).map(p => [p.project, p.total !== undefined ? `${p.passed}/${p.total} passed` : p.status])) };
     case 'read_file':
-      return { ...entry, path: args.request.path ?? args.request.paths?.join(', '), lines: args.request.lines };
+      return { ...entry, path: args.request.path ?? args.request.paths?.join(', ') ?? (args.request.hunks && `hunks ${args.request.hunks}`), lines: args.request.lines, resolved: [result, ...(result?.files ?? [])].filter(x => x?.resolvedFrom).length || undefined };
+    case 'find':
+      return { ...entry, paths: result?.paths?.length, matches: result?.matches?.length, source: result?.source?.split(' ')[0] };
+    case 'prepare_replies':
+      return { ...entry, draft: result?.draft?.id, items: result?.draft?.items?.length, approval: result?.approval ? `${result.approval.via} ${result.approval.status}` : undefined };
     case 'prepare_comments':
       return { ...entry, draft: result?.draft?.id, items: result?.draft?.items?.length,
         severities: Object.fromEntries(['blocker', 'major', 'minor', 'suggestion'].map(s => [s, result?.draft?.items?.filter(i => i.severity === s).length ?? 0]).filter(([, n]) => n)),
@@ -83,6 +87,33 @@ export function record(entry) {
     try { if (fs.statSync(FILE).size > ROTATE_AT) fs.renameSync(FILE, FILE + '.1'); } catch { /* first write */ }
     fs.appendFileSync(FILE, JSON.stringify(entry) + '\n', { mode: 0o600 });
   } catch { /* tracing must never break a review */ }
+}
+
+// Where calls fail and retries go, from the trace: the numbers that say what to fix in the server or the prompts.
+export function traceStats(events) {
+  const steps = {}, messages = {}, reviews = {};
+  for (const e of events) {
+    const key = `${e.tool === 'review_work' ? '' : `${e.tool}/`}${e.step ?? '?'}`;
+    const row = steps[key] ??= { calls: 0, errors: 0 };
+    row.calls++;
+    if (e.error) {
+      row.errors++;
+      const message = `${key}: ${e.error.replace(/[0-9a-f]{8,}/g, '#').replace(/\d+/g, 'N').slice(0, 90)}`;
+      messages[message] = (messages[message] ?? 0) + 1;
+    }
+    if (e.step === 'prepare_comments') {
+      const review = reviews[`${e.target} ${e.at.slice(0, 10)}`] ??= { failed: 0, ran: false, saved: false };
+      if (e.error) review.failed++;
+      else { review.saved = true; review.ran ||= Object.values(e.deterministic ?? {}).some(x => x === 'run'); }
+    }
+  }
+  const saved = Object.values(reviews).filter(r => r.saved);
+  return {
+    calls: events.length, from: events[0]?.at?.slice(0, 10), to: events.at(-1)?.at?.slice(0, 10),
+    steps: Object.entries(steps).sort((a, b) => b[1].calls - a[1].calls).map(([step, x]) => ({ step, ...x, rate: `${Math.round(100 * x.errors / x.calls)}%` })),
+    topErrors: Object.entries(messages).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([message, count]) => ({ count, message })),
+    reviews: { drafts: saved.length, firstTry: saved.filter(r => !r.failed).length, withChecksRun: saved.filter(r => r.ran).length },
+  };
 }
 
 export function readTrace(limit = 60) {

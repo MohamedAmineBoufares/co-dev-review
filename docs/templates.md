@@ -6,6 +6,7 @@ A template is the first message of a session for one kind of task. It tells the 
 
 | I want to… | Template |
 | --- | --- |
+| One command for any of the tasks below | [`co-dev`](#co-dev) |
 | Understand a ticket before touching it | [`explain-ticket`](#explain-ticket) |
 | Split a ticket into estimated tasks in the tracker | [`plan-ticket`](#plan-ticket) |
 | Implement a ticket, or get a prompt for an agent to implement it | [`work-ticket`](#work-ticket) |
@@ -105,6 +106,37 @@ Without a sentence like this, the assistant has no reason to run anything.
 An argument marked **no** in the Required column can be left out; the "If omitted" column says what happens then.
 
 Under each argument table, a second table gives the command for every environment. Slash commands take the values in the order of the argument table. Environments that don't list co-dev-review prompts (the Copilot CLI/app, Codex, Antigravity) use the [plain text](#plain-text-ask-the-assistant-to-run-the-cli) way: a sentence telling the assistant to run the CLI. The **Terminal** row works everywhere: run it, then paste the output as the first message.
+
+### co-dev
+
+One entry point. It sets the persona and rules for the whole conversation and routes what you ask to the right task, so you don't have to remember template names. It also ships as a skill, which is what gives `/co-dev` in Claude Code, Codex and Copilot.
+
+| Argument | Required | What it is | Example |
+| --- | --- | --- | --- |
+| `task` | no | What to do; without it, the assistant lists the tasks and asks | `review 1585 fr` |
+| `language` | no | Language of the answers and of posted text | `fr` |
+
+| Request | What it does |
+| --- | --- |
+| `review <number or URL> [fr\|en] [diff\|worktree]` | Full review, as `review-mr` |
+| `again <number or URL>` | Re-review: what changed since your last draft, and whether each earlier comment was addressed |
+| `local [base]` | As `review-local` |
+| `threads <number or URL>` | As `address-threads`, then replies drafted for your approval |
+| `pipeline <number or URL>` | As `fix-pipeline` |
+| `sonar <number or URL>` | As `fix-sonar` |
+| `ticket <id> [explain\|plan\|qa\|work]` | The ticket templates |
+| `off` | Leaves co-dev mode |
+
+```bash
+co-dev-review template co-dev task="review 1585 fr"
+```
+
+| Client | Command |
+| --- | --- |
+| Claude Code, Codex, Copilot (skill linked) | `/co-dev review 1585 fr` |
+| Claude Code plugin | `/co-dev-review:co-dev review 1585 fr` |
+| Claude Code (MCP prompt) | `/mcp__co-dev-review__co-dev "review 1585 fr"` |
+| Zed | `/mcp:co-dev-review:co-dev "review 1585 fr"` |
 
 ### explain-ticket
 
@@ -262,7 +294,7 @@ Reviews MR 306 from the diff only, against ticket 54639, with comments in French
 
 ### address-threads
 
-Collects the review threads of your MR and checks each one against the code: to fix, already done, question, or disputable. It shows you a table, then writes an English prompt for a coding agent plus draft replies for you to post. Read only.
+Collects the review threads of your MR and checks each one against the code: to fix, already done, question, or disputable. It shows you a table, then writes an English prompt for a coding agent plus draft replies for you to post. Read only by default: when you ask for the replies to be posted, they are drafted with `prepare_replies` and go through the usual approval.
 
 | # | Argument | Required | What it does | If omitted |
 | --- | --- | --- | --- | --- |

@@ -35,6 +35,10 @@ for (const template of packagedTemplates.values()) {
   for (const problem of lintTemplate(packagedTemplates, template)) problems.push(`templates/${template.name}.md: ${problem}`);
 }
 
+// /co-dev exists twice, as a skill and as an MCP prompt, so every client gets it: the routing table must not drift.
+const routes = file => /<!-- routes -->([\s\S]*?)<!-- \/routes -->/.exec(fs.readFileSync(path.join(root, file), 'utf8'))?.[1].replace(/\r\n/g, '\n');
+if (!routes('templates/co-dev.md') || routes('templates/co-dev.md') !== routes('skills/co-dev/SKILL.md')) problems.push('templates/co-dev.md and skills/co-dev/SKILL.md must carry the same routes block');
+
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const plugin = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
 if (pkg.version !== plugin.version) problems.push(`package.json ${pkg.version} and .claude-plugin/plugin.json ${plugin.version} disagree`);
