@@ -112,7 +112,7 @@ The tool only reads. Fixes are made with the assistant's own editing tools, and 
 
 ## Output size
 
-Every response is compact JSON, and each tool returns what a reviewer or planner uses rather than the providers' raw payloads: no avatars, links, hashes or styling markup. Repeated context (rubrics, repository skills, checkout state) comes once, on page 1, and rubrics are named rather than described: the skills hold the detail. The server instructions are about 2,600 characters, short enough that no client cuts them, with the approval rules first. Where more detail can matter, an explicit option returns it: `detail: "full"`, `symbols`, `lines`, `full: true` and `view_draft`.
+Every response is compact JSON, and each tool returns what a reviewer or planner uses rather than the providers' raw payloads: no avatars, links, hashes or styling markup. Repeated context (rubrics, repository skills, checkout state) comes once, on page 1, and rubrics are named rather than described: the skills hold the detail. The server instructions are under 3,000 characters, short enough that no client cuts them, with the approval rules first. Where more detail can matter, an explicit option returns it: `detail: "full"`, `symbols`, `lines`, `full: true` and `view_draft`.
 
 ## Prompt
 
