@@ -46,16 +46,50 @@ export class Providers {
     try { raw = await this.client(target.provider).request(`${this.repo(target)}/${gl ? `repository/files/${e(file)}` : `contents/${file.split('/').map(e).join('/')}`}`, { query: { ref } }); }
     catch (error) {
       // One call in eight asked for a file the API did not have; the generic message blamed access and configuration.
-      if (error instanceof ApiError && error.status === 404) throw new Error(`No file ${file} at ${String(ref).slice(0, 12)}. Use a path from the diff (deleted files have none at the head) and ref = review.head from step=read.`);
+      // One call in eight asked for a file the API did not have; notFound lets the caller look the name up in the tree.
+      if (error instanceof ApiError && error.status === 404) throw Object.assign(new Error(`No file ${file} at ${String(ref).slice(0, 12)}. Deleted files have none at the head; step=find with path lists the paths that exist.`), { notFound: true });
       throw error;
     }
     if (raw.encoding !== 'base64' || typeof raw.content !== 'string') throw new Error('File is too large, a directory, or not available as base64');
     return { file, ref, content: Buffer.from(raw.content, 'base64').toString('utf8') };
   }
+  // What changed between two commits of a review: the diff of a re-review.
+  async compare(target, from, to) {
+    const gl = target.provider === 'gitlab';
+    const raw = await this.client(target.provider).request(gl ? `${this.repo(target)}/repository/compare` : `${this.repo(target)}/compare/${e(from)}...${e(to)}`, gl ? { query: { from, to } } : {});
+    return (gl ? raw.diffs : raw.files) ?? [];
+  }
+  // Every file path at a commit. GitLab pages its tree, so a very large repository is cut at 3000 files.
+  async tree(target, ref) {
+    const api = this.client(target.provider);
+    if (target.provider === 'github') return ((await api.request(`${this.repo(target)}/git/trees/${e(ref)}`, { query: { recursive: 1 } })).tree ?? []).filter(x => x.type === 'blob').map(x => x.path);
+    const paths = [];
+    for (let page = 1; page <= 30; page++) {
+      const batch = await api.request(`${this.repo(target)}/repository/tree`, { query: { ref, recursive: true, per_page: 100, page } });
+      paths.push(...batch.filter(x => x.type === 'blob').map(x => x.path));
+      if (batch.length < 100) break;
+    }
+    return paths;
+  }
+  async search(target, query, ref) {
+    const api = this.client(target.provider);
+    if (target.provider === 'gitlab') return (await api.request(`${this.repo(target)}/search`, { query: { scope: 'blobs', search: query, ref, per_page: 30 } })).map(x => ({ path: x.path, line: x.startline, text: String(x.data ?? '').trim().slice(0, 300) }));
+    return ((await api.request('/search/code', { query: { q: `${query} repo:${target.project}`, per_page: 30 } })).items ?? []).map(x => ({ path: x.path }));
+  }
   async postFinding(target, snapshot, finding) {
     const api = this.client(target.provider);
+    if (finding.replyTo) {
+      if (target.provider !== 'gitlab') return api.request(`${this.repo(target)}/pulls/${target.number}/comments/${e(finding.replyTo)}/replies`, { method: 'POST', body: { body: finding.body } });
+      const thread = `${this.repo(target)}/merge_requests/${target.number}/discussions/${e(finding.replyTo)}`;
+      const note = await api.request(`${thread}/notes`, { method: 'POST', body: { body: finding.body } });
+      // The reply is posted either way; a failed resolve is reported, not retried, so the reply is never doubled.
+      if (finding.resolve) { try { await api.request(thread, { method: 'PUT', body: { resolved: true } }); } catch { note.warning = 'Reply posted, but the thread could not be resolved'; } }
+      return note;
+    }
     if (target.provider === 'gitlab') {
-      const position = finding.path ? { position_type: 'text', base_sha: snapshot.refs.base_sha, start_sha: snapshot.refs.start_sha, head_sha: snapshot.head, old_path: finding.oldPath || finding.path, new_path: finding.path, [finding.side === 'LEFT' ? 'old_line' : 'new_line']: finding.line } : undefined;
+      // GitLab wants both line numbers for an unchanged line and exactly one for a changed line.
+      const lines = finding.unchanged ? { old_line: finding.oldLine, new_line: finding.line } : { [finding.side === 'LEFT' ? 'old_line' : 'new_line']: finding.line };
+      const position = finding.path ? { position_type: 'text', base_sha: snapshot.refs.base_sha, start_sha: snapshot.refs.start_sha, head_sha: snapshot.head, old_path: finding.oldPath || finding.path, new_path: finding.path, ...lines } : undefined;
       return api.request(`${this.repo(target)}/merge_requests/${target.number}/discussions`, { method: 'POST', body: { body: finding.body, ...(position ? { position } : {}) } });
     }
     if (!finding.path) return api.request(`${this.repo(target)}/issues/${target.number}/comments`, { method: 'POST', body: { body: finding.body } });

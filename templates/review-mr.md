@@ -12,7 +12,7 @@ arg depth: diff, worktree, or ask (default)
 
 Run the `review-mr` skill. If your assistant cannot load skills, follow the same sequence with `review_work`:
 
-1. **Read** the MR (every page), its existing discussions and the hunk ledger. Then load **every routed rubric** before judging any code; applying them from memory does not count.
+1. **Read** the MR (every page) and its existing discussions, and follow the `next` field of each result. Load **every routed rubric** before judging any code; applying them from memory does not count. If you already drafted a review of this MR, read it with `since: "last"` and check each earlier comment first.
 2. **Pipeline:** run step `pipeline`, and report each failing required stage with its cause and `file:line`.
 3. **Depth:** {{depth|ask me whether to review from the diff only (fast) or in a local worktree (compiler, linters, tests), and for a worktree which package manager to use}}.
 4. **Ticket(s):** {{ticket|look for the work item id in the branch name (e.g. feat/54639-…). If there are several numbers, or the only number comes from the MR title and may belong to another tracker (e.g. a Mantis id), ask me which one(s) before reading}}. Read each one with `plan_ticket_tasks` step `read`, and compare every acceptance criterion with code and test evidence.
@@ -22,4 +22,4 @@ Run the `review-mr` skill. If your assistant cannot load skills, follow the same
    - each finding with its trigger, consequence, evidence, confidence and fix;
    - a table of acceptance criteria → evidence;
    - what you could not verify.
-7. **Draft** in {{language|French}} after I choose. Anchor each inline comment with `lineText`, show me the preview exactly as returned, and wait for my `approve …`.
+7. **Draft** in {{language|French}} after I choose. Anchor each inline comment with `lineText`, add a `suggestion` where the fix is one line, show me the preview exactly as returned, and wait for my `approve …`.

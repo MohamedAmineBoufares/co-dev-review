@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ledger, fileHunks, splitUnifiedDiff, expandIds, coverageGaps, anchorContext } from '../src/hunks.js';
+import { ledger, fileHunks, splitUnifiedDiff, expandIds, resolveCoverage, anchorContext } from '../src/hunks.js';
 import { suggestRubrics } from '../src/rubrics.js';
 import { parseSelection } from '../src/review-ui.js';
 import { repoSkills, readSkills } from '../src/repo-skills.js';
@@ -22,16 +22,23 @@ test('hunk identifiers survive pagination and address whole files', () => {
   assert.equal(ledger(FILES, 100)[0].id, '101.1');
   assert.deepEqual(expandIds('1.*', entries), ['1.1', '1.2']);
   assert.deepEqual(expandIds('1.1-1.2, 2.1', entries), ['1.1', '1.2', '2.1']);
-  assert.throws(() => expandIds('1.1-2.4', entries), /cannot span files/);
+  assert.deepEqual(expandIds('1.2-2.1', entries), ['1.2', '2.1'], 'a range may run from one file into the next');
+  assert.deepEqual(expandIds('1', entries), ['1.1', '1.2'], 'a bare file number is the whole file');
+  assert.throws(() => expandIds('1.1-2.4', entries), /Invalid hunk range/);
   assert.throws(() => expandIds('H3', entries), /Invalid hunk identifier/);
 });
 
 test('a review that skipped part of the diff is reported hunk by hunk', () => {
   const entries = ledger(FILES);
-  assert.deepEqual(coverageGaps(entries, [{ hunks: '1.1', verdict: 'finding' }]), ['1.2', '2.1']);
-  assert.deepEqual(coverageGaps(entries, [{ hunks: '1.*', verdict: 'reviewed-clean' }, { hunks: '2.1', verdict: 'not-applicable' }]), []);
-  assert.throws(() => coverageGaps(entries, [{ hunks: '1.1', verdict: 'finding' }, { hunks: '1.1', verdict: 'reviewed-clean' }]), /claimed twice/);
-  assert.throws(() => coverageGaps(entries, [{ hunks: '9.9', verdict: 'finding' }]), /Unknown hunk identifiers/);
+  assert.match(resolveCoverage(entries, [{ hunks: '1.1', verdict: 'finding' }]).problems[0], /No verdict for 2 of 3 hunks: 1\.2, 2\.1/);
+  assert.deepEqual(resolveCoverage(entries, [{ hunks: '1.*', verdict: 'reviewed-clean' }, { hunks: '2.1', verdict: 'not-applicable' }]).problems, []);
+  assert.deepEqual(resolveCoverage(entries, [{ hunks: '1.1', verdict: 'finding' }, { hunks: '1.1', verdict: 'reviewed-clean' }, { hunks: 'rest', verdict: 'reviewed-clean' }]).problems, [], 'a repeated claim is not worth a retry');
+  assert.match(resolveCoverage(entries, [{ hunks: '9.9', verdict: 'finding' }, { hunks: 'rest', verdict: 'reviewed-clean' }]).problems[0], /Unknown hunk ids: 9\.9/);
+  // A hunk that carries a comment answers for itself, and one "rest" claim covers what is left: both are counted for the approver.
+  const covered = resolveCoverage(entries, [{ hunks: 'rest', verdict: 'reviewed-clean' }], ['1.2']);
+  assert.deepEqual(covered, { problems: [], summary: { finding: 1, 'reviewed-clean': 2 }, bulk: 2 });
+  // Every problem comes back at once: a bad id and a gap cost one retry, not two.
+  assert.equal(resolveCoverage(entries, [{ hunks: 'H3', verdict: 'finding' }]).problems.length, 2);
 });
 
 test('comment anchors carry the surrounding diff so approval shows code', () => {
@@ -105,12 +112,13 @@ test('rubric text is served over the tool channel for clients without skills', a
 
 test('trace summaries carry names and counts only, never bodies', () => {
   const read = summarize('review_work', { request: { step: 'read', target: { provider: 'gitlab', project: 'g/r', number: 7 } } }, {
-    changes: { data: [{ new_path: 'a.tsx' }] }, hunks: [{ path: 'a.tsx' }, { path: 'a.tsx' }], page: 1,
-    rubrics: { rubrics: [{ id: 'react-ts', skill: 'review-react-ts' }, { id: 'typescript', skill: 'review-react-ts' }, { id: 'tests', skill: null }] },
+    changes: { data: [{ new_path: 'a.tsx' }] }, hunkCount: 2, page: 1,
+    rubrics: { requiredSkills: ['review-react-ts'] },
     repoSkills: { skills: [{ name: 'house-style' }] }, localCheckout: { branch: 'release', matchesReview: false },
   });
   assert.equal(read.target, 'gitlab g/r #7');
-  assert.deepEqual(read.rubricsOffered, ['review-react-ts', 'tests (no packaged skill)'], 'one skill serving two rubric ids is listed once');
+  assert.deepEqual(read.rubricsOffered, ['review-react-ts']);
+  assert.equal(read.hunks, 2);
   assert.deepEqual(read.repoSkillsOffered, ['house-style']);
   assert.match(read.checkout, /MISMATCH: local is on release/);
   const prepared = summarize('review_work', { request: { step: 'prepare_comments', target: { provider: 'gitlab', number: 7 } } }, {

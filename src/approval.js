@@ -14,7 +14,7 @@ const DESCRIPTION_LIMIT = 1800;
 
 export function itemTitle(item) {
   if (!item.severity) return `${item.id} · ${item.title} · ${item.estimatedHours} h`;
-  const where = item.path ? `${item.path}:${item.line}` : 'general comment';
+  const where = item.replyTo ? `reply to ${item.thread?.author ?? 'a thread'}${item.resolve ? ', resolving it' : ''}` : item.path ? `${item.path}:${item.line}` : 'general comment';
   return `${item.id} · ${item.severity.toUpperCase()}${item.confidence ? ` (${item.confidence})` : ''} · ${where}`;
 }
 export function itemText(item) {
@@ -27,7 +27,11 @@ const heading = draft => draft.kind === 'review'
   : `Tasks under ${{ azure: 'Azure DevOps', jira: 'Jira', github: 'GitHub' }[draft.tracker ?? 'azure']} ${draft.parent?.id}: ${draft.parent?.title ?? draft.parent?.fields?.['System.Title'] ?? ''}`;
 
 // Markdown the assistant shows verbatim: one block per item with its code, so the user can choose in the chat.
-const ICON = { blocker: '🔴', major: '🟠', minor: '🔵', suggestion: '⚪' };
+const ICON = { blocker: '🔴', major: '🟠', minor: '🔵', suggestion: '⚪', reply: '↩' };
+const BULK = /^(rest|\*|all)$/i;
+// The approver decides with this in view: a comment written without the compiler having run reads differently.
+const evidenceLine = draft => (draft.deterministic ? `  \nEvidence: ${Object.entries(draft.deterministic).map(([pass, x]) => `${pass} ${x.runId ? 'ran' : `not run (${x.skipped})`}`).join(' · ')}` : '')
+  + (draft.coverage?.bulk ? `  \n${draft.coverage.bulk} of ${draft.coverage.hunkCount} hunks were claimed in bulk as ${draft.coverage.claims?.find(c => BULK.test(c.hunks.trim()))?.verdict ?? 'reviewed'}` : '');
 export function renderPreview(draft, onlyIds) {
   const items = draft.items.filter(item => !onlyIds || onlyIds.includes(item.id));
   const blocks = items.map(item => {
@@ -35,19 +39,21 @@ export function renderPreview(draft, onlyIds) {
       const description = itemText({ description: item.description }).split('\n').map(line => `> ${line}`).join('\n');
       return `### ${item.id} · ${item.title} · ${item.estimatedHours} h\n${description}`;
     }
-    const where = item.path ? `\`${item.path}:${item.line}\`` : 'general comment';
+    const where = item.replyTo ? `reply to ${item.thread?.author ?? 'a thread'}${item.thread?.path ? ` on \`${item.thread.path}:${item.thread.line}\`` : ''}${item.resolve ? ' · resolves the thread' : ''}`
+      : item.path ? `\`${item.path}:${item.line}\`${item.unchanged ? ' (unchanged line)' : ''}` : 'general comment';
+    const notes = (item.thread?.said ? `\n*They wrote: ${item.thread.said}*` : '') + (item.nearExisting ? `\n⚠ Near an open thread by ${item.nearExisting}` : '');
     const snippet = item.context?.snippet
       ? `\n\`\`\`diff\n${item.context.snippet.split('\n').map((line, i) => (i === item.context.markerIndex ? `${line}    ◀` : line)).join('\n')}\n\`\`\``
       : '';
     const body = String(item.body).split('\n').map(line => `> ${line}`).join('\n');
-    return `### ${item.id} · ${ICON[item.severity] ?? ''} ${item.severity.toUpperCase()}${item.confidence ? ` (${item.confidence})` : ''} · ${where}${snippet}\n${body}`;
+    return `### ${item.id} · ${ICON[item.severity] ?? ''} ${item.severity.toUpperCase()}${item.confidence ? ` (${item.confidence})` : ''} · ${where}${notes}${snippet}\n${body}`;
   });
   if (onlyIds) return blocks.join('\n\n');
   const counts = Object.entries(items.reduce((n, item) => ({ ...n, [item.severity ?? 'task']: (n[item.severity ?? 'task'] ?? 0) + 1 }), {})).map(([k, v]) => `${v} ${k}`).join(', ');
   const verb = draft.kind === 'review' ? 'post' : 'create';
   return [
     `## ${draft.kind === 'review' ? 'Review comments' : 'Tasks'} to approve · draft \`${draft.id.slice(0, 8)}\``,
-    `${heading(draft)}  \n${draft.destination}  \n${items.length} item(s): ${counts}${draft.rubricsApplied ? `  \nRubrics applied: ${draft.rubricsApplied.join(', ') || 'none'}` : ''}${draft.rubricsSkipped?.length ? `  \n⚠ Skipped: ${draft.rubricsSkipped.map(x => `${x.name} (${x.reason})`).join('; ')}` : ''}`,
+    `${heading(draft)}  \n${draft.destination}  \n${items.length} item(s): ${counts}${draft.rubricsApplied ? `  \nRubrics applied: ${draft.rubricsApplied.join(', ') || 'none'}` : ''}${draft.rubricsSkipped?.length ? `  \n⚠ Skipped: ${draft.rubricsSkipped.map(x => `${x.name} (${x.reason})`).join('; ')}` : ''}${evidenceLine(draft)}`,
     ...blocks,
     '---',
     `Reply **approve all**, **approve R1 R3**, **approve all except R2** or **cancel**. Add "later" to approve without ${verb === 'post' ? 'posting' : 'creating'} now. You can also ask to reword an item first.`.replace(/R(\d)/g, draft.kind === 'review' ? 'R$1' : 'T$1'),

@@ -52,6 +52,30 @@ export class Store {
     if (matches.length > 1) throw new Error(`"${reference}" matches ${matches.length} drafts; use more characters`);
     return matches[0].id;
   }
+  // Earlier review drafts of the same merge request, newest first, each with what the approver did with its items.
+  async reviewHistory(destination, number) {
+    const history = [];
+    for (const { id } of await this.list()) {
+      const draft = await this.read(id);
+      if (draft.kind !== 'review' || draft.destination !== destination || (number && draft.target?.number !== number)) continue;
+      const [approval, journal] = await Promise.all([this.maybe(id, 'approval.json'), this.journal(id)]);
+      history.push({ draft, approval, journal });
+    }
+    return history;
+  }
+  // Comments the approver left unticked: the only human judgement of this reviewer's output that exists locally.
+  async rejected(destination, limit = 8) {
+    const dropped = [];
+    for (const { draft, approval } of await this.reviewHistory(destination)) {
+      if (!approval) continue;
+      for (const item of draft.items) {
+        if (approval.selectedIds.includes(item.id) || !item.severity || item.replyTo) continue;
+        dropped.push({ severity: item.severity, path: item.path, said: String(item.body).replace(/\s+/g, ' ').slice(0, 160) });
+        if (dropped.length >= limit) return dropped;
+      }
+    }
+    return dropped;
+  }
   async updateItem(id, itemId, patch) {
     return this.withLock(id, async () => {
       const draft = await this.read(id);

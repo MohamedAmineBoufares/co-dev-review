@@ -8,7 +8,7 @@ The server supplies evidence and enforces the rules. Your assistant's LLM does t
 
 The `review-mr` skill (or the server's own instructions, for clients without skills) runs these steps:
 
-1. **Read**: the MR/PR, every diff page, existing discussions, and a ledger of every changed hunk.
+1. **Read**: the MR/PR, every diff page with its files numbered, and the existing discussions. Each result says what to do next in its `next` field, so the sequence doesn't depend on the model remembering a long prompt.
 2. **Load the expertise**: the rubrics routed for the changed files, plus the reviewed repository's own skills.
 3. **Checkout**: the MR/PR head goes into a dedicated git worktree.
 4. **Checks**: the repository's compiler and linters run there.
@@ -96,11 +96,24 @@ A failing test turns "this looks wrong" into a confirmed finding. A project whos
 
 ## Rules the server enforces
 
-- **Every hunk gets a verdict.** `step=read` returns one ledger entry per changed hunk, with an id `<file index>.<hunk index>` that stays stable across pagination. `prepare_comments` requires `finding`, `reviewed-clean` or `not-applicable` for every hunk (`7.*` for a whole file, `7.2-7.5` for a range), and names any hunk that is missing.
-- **The deterministic passes must have run on this review.** (`tests` is optional, and checked the same way when given.) Each `checks` and `blast_radius` call returns a `runId`, recorded with the commit and base it analysed. `prepare_comments` requires `deterministic: { checks, blastRadius }`, each `{ runId }` or `{ skipped: "<reason>" }`. A run on another commit, another base or an empty range is rejected. A skip and its reason are shown to you at approval.
+- **Every hunk gets a verdict.** `step=read` numbers each file; hunk `<file>.<n>` is its n-th `@@`, stable across pagination. `prepare_comments` requires `finding`, `reviewed-clean` or `not-applicable` for every hunk (`7.*` for a whole file, `7.2-7.5` for a range), and names any hunk that is missing. A hunk that carries a comment is covered by it, generated files (lockfiles, snapshots) need none, and `rest` covers what is left; the approval preview says how many hunks were claimed that way.
+- **The approver sees whether the deterministic passes ran.** Each `checks`, `blast_radius` and `tests` run is recorded with the commit and base it analysed. When a draft is saved, the server looks those runs up itself: only one on this review's head and base counts. A pass that didn't run is written into the draft as not run, and the preview shows it on its `Evidence` line before you approve anything.
+- **A refused draft says everything that is wrong.** Anchors that don't match, hunks without a verdict and rubrics left out are numbered in one error, so the assistant fixes them in one retry instead of resending every comment three times.
 - **Findings carry a confidence.** After trying to refute each finding (full file, caller, callee, whether the trigger can reach production), the reviewer marks it `confirmed`, `likely` or `question`. A `blocker` must be `confirmed`, and a `question` is written as a question.
 - **Every routed rubric is accounted for.** A draft must list each rubric routed for the changed files as applied, or as skipped with a reason that the approver sees.
-- **Inline comments land on real changed lines.** Comments are anchored by the text of the changed line (`lineText`), and the server finds the line number, so hand-counted lines can't drift by one. Anchors are checked against added or deleted lines at the reviewed commit; context lines go into a general comment.
+- **Inline comments land on real lines of the diff.** Comments are anchored by the text of the line (`lineText`), and the server finds the line number, so hand-counted lines can't drift by one. Whitespace and a copied `+`/`-` don't matter, and a miss names the closest lines. Anchors are checked against the reviewed commit: an added or deleted line, or an unchanged line shown in a hunk.
+- **A comment near an open thread is flagged.** If an inline comment lands within three lines of a thread somebody already opened, the preview names that thread, so you don't post the same point twice.
+
+## Re-reviews, replies and what you rejected
+
+- **Re-review.** After the author pushes, `read` with `since: "last"` returns only what changed since the head of your previous draft, with that draft's comments, so the second pass checks whether each one was addressed instead of starting over.
+- **Replies.** `prepare_replies` drafts answers to existing threads (and can resolve them on GitLab). They go through the same preview, approval and journal as comments.
+- **Suggestions.** A finding can carry a `suggestion`: the replacement for its line, posted as a block the author applies in one click.
+- **Memory of your choices.** Comments you leave unticked at approval are remembered on your machine. The next `read` of the same project returns the most recent ones as `rejectedBefore`, so the assistant doesn't raise the same kind of point again. This is the only feedback the reviewer gets, and it works with any model.
+
+## Finding code outside the diff
+
+A diff-only review fails when the model guesses where a caller lives. `find` answers that: `path` returns the files matching a name or partial path at the review head, and `query` returns where a text appears. `read_file` uses the same lookup when a path doesn't exist, so an import alias or a wrong root resolves instead of failing, and `hunks: "3.2"` reads a hunk with the code around it without any line arithmetic.
 
 ## What the review actually did: the trace
 
@@ -123,6 +136,8 @@ gitlab acme/shop/front #306  2026-09-10
                            approval: in-chat published
                            deterministic: checks run, blastRadius run
 ```
+
+`co-dev-review stats` summarises the whole trace: how often each step fails, how many drafts were saved at the first attempt, how many had compiler evidence, and the most frequent errors. Invalid calls are recorded too, so it shows where a given model struggles.
 
 The trace is evidence that the protocol was followed. It isn't a complete record of what the model read: skills a client loads natively and files it opens with its own tools never pass through the server. Set `CO_DEV_TRACE=off` to disable it. The file rotates at 5 MB.
 
